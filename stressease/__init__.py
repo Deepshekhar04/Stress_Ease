@@ -18,17 +18,17 @@ def create_app():
     app.config.from_object(Config)
     
     # Initialize services
-    from stressease.services.firebase_service import init_firebase
-    from stressease.services.gemini_service import init_gemini
+    from stressease.services.firebase_config import init_firebase
+    from stressease.services.llm_service import init_gemini
     
     try:
         # Initialize Firebase
         init_firebase(Config.FIREBASE_CREDENTIALS_PATH)
         print("✓ Firebase initialized successfully")
         
-        # Initialize Gemini AI
+        # Initialize Gemini AI (dual-model LLM)
         init_gemini(Config.GEMINI_API_KEY)
-        print("✓ Gemini AI initialized successfully")
+        print("✓ LLM service initialized successfully")
         
     except Exception as e:
         print(f"✗ Service initialization error: {e}")

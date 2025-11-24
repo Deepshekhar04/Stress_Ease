@@ -1,29 +1,44 @@
-"""Chat endpoints: sessions and messages with local storage on Android."""
+"""
+Chat API endpoints with LangChain integration.
+
+This module provides:
+- POST /message - Send chat message with implicit session creation
+- POST /end-session - End chat session and cleanup resources
+- GET /crisis-resources - Get country-specific crisis resources
+"""
 
 from flask import Blueprint, request, jsonify
 from stressease.services.auth_service import token_required
-from stressease.services.gemini_service import (
-    generate_chat_response, start_chat_session, find_crisis_resources
-)
-from stressease.services.firebase_service import (
-    get_cached_crisis_resources, cache_crisis_resources
-)
+from stressease.services import llm_service
+from stressease.services import chat_memory_service
+from stressease.services import mood_service
+from stressease.services import crisis_resource_service
+from langchain.memory import ConversationBufferWindowMemory
 from datetime import datetime
 import uuid
+import threading
+
 
 # Create the chat blueprint
 chat_bp = Blueprint('chat', __name__)
 
-#------------------------------------------------------------------------------
+
+# ============================================================================
+# IN-MEMORY SESSION CACHE
+# ============================================================================
+# Format: {user_id: {session_id: {'conversation_chain': chain, 'memory': memory, 'last_activity': timestamp, 'message_count': int}}}
+active_chat_sessions = {}
+
+
+# ============================================================================
 # CRISIS SUPPORT ENDPOINTS
-#------------------------------------------------------------------------------
+# ============================================================================
 
-
-@chat_bp.route('/crisis-resources', methods=['GET' , 'POST'])
+@chat_bp.route('/crisis-resources', methods=['GET', 'POST'])
 @token_required
 def get_crisis_resources(user_id):
     """
-    Endpoint for getting country-specific Crisis resources.
+    Get country-specific crisis resources.
     Triggered when user selects a country from dropdown in the SOS section.
     
     Query Parameters:
@@ -33,17 +48,16 @@ def get_crisis_resources(user_id):
         JSON response with country-specific crisis resources
     """
     try:
-        # Get country from query parameter - Android app sends from dropdown
+        # Get country from query parameter
         country = request.args.get('country', '').strip()
         
-        # Set default country if somehow not provided (fallback only)
+        # Default to India if not provided
         if not country:
             country = 'India'
         
-        # Step 1: Check cache first
-        cached_resources = get_cached_crisis_resources(country)
+        # Check cache first
+        cached_resources = crisis_resource_service.get_cached_crisis_resources(country)
         
-        # Step 2: Cache hit - return cached resources
         if cached_resources:
             response = jsonify({
                 'success': True,
@@ -54,20 +68,20 @@ def get_crisis_resources(user_id):
             response.headers['Content-Type'] = 'application/json; charset=utf-8'
             return response, 200
         
-        # Step 3: Cache miss - generate new resources using Gemini
-        resources = find_crisis_resources(country)
+        # Cache miss - generate using Gemini
+        resources = llm_service.find_crisis_resources(country)
         if not resources:
             response = jsonify({
                 'success': False,
-                'message': f'Could not find Crisis resources for {country}'
+                'message': f'Could not find crisis resources for {country}'
             })
             response.headers['Content-Type'] = 'application/json; charset=utf-8'
             return response, 404
         
-        # Step 4: Cache the new resources in Firebase
-        cache_success = cache_crisis_resources(country, resources)
+        # Cache the new resources
+        cache_success = crisis_resource_service.cache_crisis_resources(country, resources)
         
-        # Step 5: Return the resources
+        # Return the resources
         response = jsonify({
             'success': True,
             'message': 'Crisis resources generated using AI',
@@ -87,20 +101,15 @@ def get_crisis_resources(user_id):
         return response, 500
 
 
-# Dictionary to store active chat sessions by user_id
-# Format: {user_id: {session_id: chat_session}}
-active_chat_sessions = {}
+# ============================================================================
+# CHAT MESSAGE ENDPOINT
+# ============================================================================
 
-
-# Endpoint: POST /api/chat/message
-# Purpose:  Send message and create session implicitly if needed
-#------------------------------------------------------------------------------
 @chat_bp.route('/message', methods=['POST'])
 @token_required
 def send_chat_message(user_id):
     """
-    Endpoint for sending messages with implicit session creation.
-    Chat history is stored locally on Android device.
+    Send a chat message with implicit session creation and LangChain integration.
     
     Expected JSON payload:
     {
@@ -109,7 +118,7 @@ def send_chat_message(user_id):
     }
     
     Returns:
-        JSON response with AI reply and session_id for local storage
+        JSON response with AI reply and session_id
     """
     try:
         # Get and validate JSON data
@@ -125,7 +134,7 @@ def send_chat_message(user_id):
         user_message = message_data.get('message', '').strip()
         session_id = message_data.get('session_id')
         
-        # Input validation - optimized with early returns
+        # Input validation
         if not user_message:
             return jsonify({
                 'success': False,
@@ -140,22 +149,46 @@ def send_chat_message(user_id):
                 'message': 'Message must be 1000 characters or less'
             }), 400
         
-        # Create timestamp once for efficiency
-        timestamp = datetime.utcnow().isoformat()
-        
-        # Get or create session with user_id to maintain context
-        session_id, chat_session = _get_or_create_session(session_id, user_id)
-        if not chat_session:
+        # Get or create session
+        session_id, conversation_chain, memory = _get_or_create_session(session_id, user_id)
+        if not conversation_chain:
             return jsonify({
                 'success': False,
                 'error': 'Session not found',
                 'message': 'Chat session has expired or does not exist'
             }), 404
         
-        # Generate AI response (validation is already done inside generate_chat_response)
-        ai_response = generate_chat_response(chat_session, user_message)
+        # Generate AI response using LangChain conversation chain
+        ai_response = llm_service.generate_chat_response(conversation_chain, user_message)
         
-        # Return standard response structure
+        # Check if profile is incomplete and add nudge if needed
+        user_profile = firebase_service.get_user_profile(user_id)
+        profile_complete = _is_profile_complete(user_profile)
+        if not profile_complete:
+            ai_response = _add_profile_nudge(ai_response)
+        
+        # Get current turn number from memory
+        turn_number = len(memory.chat_memory.messages) // 2
+        
+        # Save conversation turn to Firestore (async in background)
+        threading.Thread(
+            target=chat_memory_service.save_conversation_turn,
+            args=(user_id, session_id, user_message, ai_response, turn_number)
+        ).start()
+        
+        # Update session activity (async in background)
+        threading.Thread(
+            target=chat_memory_service.update_session_activity,
+            args=(user_id, session_id)
+        ).start()
+        
+        # Update message count in cache
+        if user_id in active_chat_sessions and session_id in active_chat_sessions[user_id]:
+            active_chat_sessions[user_id][session_id]['message_count'] += 1
+            active_chat_sessions[user_id][session_id]['last_activity'] = datetime.utcnow()
+        
+        # Return response
+        timestamp = datetime.utcnow().isoformat()
         return jsonify({
             'success': True,
             'user_message': {
@@ -168,10 +201,15 @@ def send_chat_message(user_id):
                 'timestamp': timestamp,
                 'role': 'assistant'
             },
-            'session_id': session_id
+            'session_id': session_id,
+            'metadata': {
+                'profile_complete': profile_complete,
+                'message_count': active_chat_sessions.get(user_id, {}).get(session_id, {}).get('message_count', 0)
+            }
         }), 201
         
     except Exception as e:
+        print(f"Error in send_chat_message: {str(e)}")
         return jsonify({
             'success': False,
             'error': 'Failed to process message',
@@ -179,60 +217,15 @@ def send_chat_message(user_id):
         }), 500
 
 
-def _get_or_create_session(session_id, user_id):
-    """
-    Optimized helper function to get existing session or create new one.
-    Sessions are now associated with user_id to maintain context.
-    
-    Args:
-        session_id (str): Session ID or None
-        user_id (str): User ID from authentication
-        
-    Returns:
-        tuple: (session_id, chat_session) or (None, None) if failed
-    """
-    try:
-        # Initialize user's session dictionary if it doesn't exist
-        if user_id not in active_chat_sessions:
-            active_chat_sessions[user_id] = {}
-        
-        # If no session_id provided, check if user has any active sessions
-        if not session_id:
-            # If user has active sessions, use the most recent one
-            if active_chat_sessions[user_id]:
-                # Get the first session (assuming it's the most recent)
-                # In a production app, you might want to track timestamps
-                session_id = next(iter(active_chat_sessions[user_id]))
-                return session_id, active_chat_sessions[user_id][session_id]
-            
-            # No active sessions, create a new one
-            session_id = str(uuid.uuid4())
-            chat_session = start_chat_session({})
-            active_chat_sessions[user_id][session_id] = chat_session
-            return session_id, chat_session
-        
-        # Check if the specific session exists for this user
-        if session_id in active_chat_sessions[user_id]:
-            return session_id, active_chat_sessions[user_id][session_id]
-        
-        # Session not found for this user
-        return None, None
-        
-    except Exception:
-        return None, None
+# ============================================================================
+# SESSION MANAGEMENT ENDPOINT
+# ============================================================================
 
-
-
-
-
-# Endpoint: POST /api/chat/end-session
-# Purpose:  End chat session and cleanup server resources
 @chat_bp.route('/end-session', methods=['POST'])
 @token_required
 def end_chat_session(user_id):
     """
-    Optimized endpoint to end a chat session and clean up server-side resources.
-    The complete chat history is stored locally on the Android device.
+    End a chat session and cleanup server-side resources.
     
     Expected JSON payload:
     {
@@ -261,15 +254,19 @@ def end_chat_session(user_id):
                 'message': 'session_id is required'
             }), 400
         
-        # Optimized cleanup - batch operations
         cleanup_count = 0
         
-        # Clean up active session from memory cache
+        # Clean up in-memory session
         if user_id in active_chat_sessions and session_id in active_chat_sessions[user_id]:
             del active_chat_sessions[user_id][session_id]
             cleanup_count += 1
-            
-            
+        
+        # Mark session as ended in Firestore (async)
+        threading.Thread(
+            target=chat_memory_service.end_session,
+            args=(user_id, session_id)
+        ).start()
+        
         return jsonify({
             'success': True,
             'message': 'Session ended successfully',
@@ -283,3 +280,154 @@ def end_chat_session(user_id):
             'message': str(e)
         }), 500
 
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def _get_or_create_session(session_id, user_id):
+    """
+    Get existing session or create new one with LangChain conversation chain.
+    
+    Args:
+        session_id (str): Session ID or None
+        user_id (str): User ID from authentication
+        
+    Returns:
+        tuple: (session_id, conversation_chain, memory) or (None, None, None) if failed
+    """
+    try:
+        # Initialize user's session dictionary if it doesn't exist
+        if user_id not in active_chat_sessions:
+            active_chat_sessions[user_id] = {}
+        
+        # Case 1: No session_id provided - create new session
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            
+            # Create session metadata in Firestore (async)
+            threading.Thread(
+                target=chat_memory_service.create_session_metadata,
+                args=(user_id, session_id)
+            ).start()
+            
+            # Fetch user context in parallel
+            user_profile = chat_memory_service.get_user_profile(user_id)
+            mood_logs = mood_service.get_last_daily_mood_logs(user_id, limit=7)
+            
+            # Generate mood summary if logs exist (using Chain A)
+            mood_summary = ""
+            if mood_logs:
+                mood_summary = llm_service.summarize_mood_logs(mood_logs)
+            
+            # Build user context
+            user_context = llm_service.build_user_context(user_profile, mood_summary)
+            
+            # Create conversation memory (keeps last 25 messages)
+            memory = ConversationBufferWindowMemory(
+                k=25,
+                return_messages=True,
+                memory_key="history"
+            )
+            
+            # Create conversation chain (Chain B)
+            conversation_chain = llm_service.create_conversation_chain(user_context, memory)
+            
+            # Store in cache
+            active_chat_sessions[user_id][session_id] = {
+                'conversation_chain': conversation_chain,
+                'memory': memory,
+                'last_activity': datetime.utcnow(),
+                'message_count': 0
+            }
+            
+            return session_id, conversation_chain, memory
+        
+        # Case 2: Session_id provided - check cache first
+        if session_id in active_chat_sessions[user_id]:
+            session_data = active_chat_sessions[user_id][session_id]
+            return session_id, session_data['conversation_chain'], session_data['memory']
+        
+        # Case 3: Session not in cache - try loading from Firestore
+        # Check if session has expired
+        if chat_memory_service.check_session_expired(user_id, session_id, expiry_hours=24):
+            # Session expired - return None to trigger new session creation
+            return None, None, None
+        
+        # Load conversation memory from Firestore
+        messages = chat_memory_service.load_conversation_memory(user_id, session_id, max_messages=25)
+        
+        # Fetch user context
+        user_profile = chat_memory_service.get_user_profile(user_id)
+        mood_logs = mood_service.get_last_daily_mood_logs(user_id, limit=7)
+        
+        # Generate mood summary if logs exist
+        mood_summary = ""
+        if mood_logs:
+            mood_summary = llm_service.summarize_mood_logs(mood_logs)
+        
+        # Build user context
+        user_context = gemini_service.build_user_context(user_profile, mood_summary)
+        
+        # Create conversation memory and add loaded messages
+        memory = ConversationBufferWindowMemory(
+            k=25,
+            return_messages=True,
+            memory_key="history"
+        )
+        
+        # Add loaded messages to memory
+        for msg in messages:
+            memory.chat_memory.add_message(msg)
+        
+        # Create conversation chain
+        conversation_chain = gemini_service.create_conversation_chain(user_context, memory)
+        
+        # Store in cache
+        active_chat_sessions[user_id][session_id] = {
+            'conversation_chain': conversation_chain,
+            'memory': memory,
+            'last_activity': datetime.utcnow(),
+            'message_count': len(messages) // 2
+        }
+        
+        return session_id, conversation_chain, memory
+        
+    except Exception as e:
+        print(f"Error in _get_or_create_session: {str(e)}")
+        return None, None, None
+
+
+def _is_profile_complete(user_profile):
+    """
+    Check if user profile is complete.
+    
+    Args:
+        user_profile (dict): User profile data
+        
+    Returns:
+        bool: True if profile is complete, False otherwise
+    """
+    if not user_profile:
+        return False
+    
+    # Check for essential profile fields
+    has_name = bool(user_profile.get('name'))
+    has_age = bool(user_profile.get('age'))
+    
+    # Consider profile complete if it has at least name and age
+    return has_name and has_age
+
+
+def _add_profile_nudge(ai_response):
+    """
+    Add a gentle profile completion nudge to the AI response.
+    
+    Args:
+        ai_response (str): Original AI response
+        
+    Returns:
+        str: Response with nudge appended
+    """
+    nudge = "\n\n💡 Tip: Complete your profile for more personalized support."
+    return ai_response + nudge
