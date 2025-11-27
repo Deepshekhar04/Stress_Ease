@@ -17,9 +17,14 @@ from stressease.services.utility.firebase_config import get_firestore_client
 # ============================================================================
 
 
-def save_daily_mood_log(user_id: str, daily_log: Dict[str, Any]) -> Optional[str]:
+def save_daily_mood_log(
+    user_id: str, daily_log: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
     """
-    Save a structured daily mood quiz log to Firestore.
+    Save a structured daily mood quiz log to Firestore using composite document ID.
+
+    Uses {user_id}_{date} as document ID to ensure one entry per user per day.
+    Updates existing document if user submits multiple times in same day.
 
     Collection: user_mood_logs
 
@@ -28,20 +33,53 @@ def save_daily_mood_log(user_id: str, daily_log: Dict[str, Any]) -> Optional[str
         daily_log (dict): Structured daily log payload
 
     Returns:
-        Optional[str]: Document ID if saved successfully, else None
+        Optional[Dict]: {
+            "doc_id": str,
+            "is_update": bool,
+            "submission_count": int
+        } if saved successfully, else None
     """
     db = get_firestore_client()
 
     try:
-        daily_log["user_id"] = user_id
-        # Default date if not provided
+        # Ensure date is set (use client-provided date for timezone accuracy)
         if "date" not in daily_log or not daily_log["date"]:
             daily_log["date"] = date.today().isoformat()
-        # Server-side timestamp
-        daily_log["submitted_at"] = datetime.utcnow()
 
-        doc_ref = db.collection("user_mood_logs").add(daily_log)
-        return doc_ref[1].id
+        # Create composite document ID: {user_id}_{date}
+        doc_id = f"{user_id}_{daily_log['date']}"
+        doc_ref = db.collection("user_mood_logs").document(doc_id)
+
+        # Check if document already exists
+        existing = doc_ref.get()
+        is_update = existing.exists
+
+        # Set user_id
+        daily_log["user_id"] = user_id
+
+        # Handle timestamps and submission tracking
+        if is_update:
+            # Preserve first submission time, update last modified time
+            existing_data = existing.to_dict()
+            daily_log["first_submitted_at"] = existing_data.get(
+                "first_submitted_at", datetime.utcnow()
+            )
+            daily_log["last_updated_at"] = datetime.utcnow()
+            daily_log["submission_count"] = existing_data.get("submission_count", 1) + 1
+        else:
+            # First submission
+            daily_log["first_submitted_at"] = datetime.utcnow()
+            daily_log["last_updated_at"] = datetime.utcnow()
+            daily_log["submission_count"] = 1
+
+        # Set document (full replace)
+        doc_ref.set(daily_log)
+
+        return {
+            "doc_id": doc_id,
+            "is_update": is_update,
+            "submission_count": daily_log["submission_count"],
+        }
     except Exception as e:
         print(f"Error saving daily mood log for {user_id}: {str(e)}")
         return None
@@ -181,3 +219,61 @@ def save_weekly_dass_totals(
     except Exception as e:
         print(f"Error saving weekly DASS totals for {user_id}: {str(e)}")
         return None
+
+
+# ============================================================================
+# DAILY QUIZ DUPLICATE PREVENTION
+# ============================================================================
+
+
+def get_daily_mood_log_by_date(user_id: str, date_str: str) -> Optional[Dict[str, Any]]:
+    """
+    Check if a mood log already exists for a specific date.
+
+    Args:
+        user_id (str): Firebase Auth user ID
+        date_str (str): ISO date string (YYYY-MM-DD)
+
+    Returns:
+        Optional[Dict]: Existing log with 'id' field, or None if not found
+    """
+    db = get_firestore_client()
+
+    try:
+        query = (
+            db.collection("user_mood_logs")
+            .where("user_id", "==", user_id)
+            .where("date", "==", date_str)
+            .limit(1)
+        )
+        docs = query.stream()
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            return data
+        return None
+    except Exception as e:
+        print(f"Error checking daily mood log for {user_id} on {date_str}: {str(e)}")
+        return None
+
+
+def update_daily_mood_log(doc_id: str, daily_log: Dict[str, Any]) -> bool:
+    """
+    Update an existing daily mood log.
+
+    Args:
+        doc_id (str): Document ID to update
+        daily_log (dict): Updated log data
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    db = get_firestore_client()
+
+    try:
+        daily_log["submitted_at"] = datetime.utcnow()  # Update timestamp
+        db.collection("user_mood_logs").document(doc_id).update(daily_log)
+        return True
+    except Exception as e:
+        print(f"Error updating daily mood log {doc_id}: {str(e)}")
+        return False

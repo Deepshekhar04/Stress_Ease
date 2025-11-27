@@ -8,6 +8,8 @@ from stressease.services.mood.mood_service import (
     get_daily_mood_logs_count,
     weekly_dass_exists,
     save_weekly_dass_totals,
+    get_daily_mood_log_by_date,
+    update_daily_mood_log,
 )
 from datetime import datetime, date
 
@@ -217,19 +219,57 @@ def submit_daily_quiz(user_id):
         if "additional_notes" in payload and payload["additional_notes"]:
             daily_doc["additional_notes"] = payload["additional_notes"]
 
-        # Save daily log
-        log_id = save_daily_mood_log(user_id, daily_doc)
-        if not log_id:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Database error",
-                        "message": "Failed to save daily mood log",
-                    }
-                ),
-                500,
+        # Check if quiz for today already exists (prevent duplicates)
+        quiz_date = daily_doc.get("date") or date.today().isoformat()
+        daily_doc["date"] = quiz_date  # Ensure date is set
+
+        existing_quiz = get_daily_mood_log_by_date(user_id, quiz_date)
+
+        if existing_quiz:
+            # Update existing quiz instead of creating duplicate
+            log_id = existing_quiz["id"]
+            success = update_daily_mood_log(log_id, daily_doc)
+            if not success:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Database error",
+                            "message": "Failed to update daily mood log",
+                        }
+                    ),
+                    500,
+                )
+        else:
+            # Save new daily log
+            log_id = save_daily_mood_log(user_id, daily_doc)
+            if not log_id:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Database error",
+                            "message": "Failed to save daily mood log",
+                        }
+                    ),
+                    500,
+                )
+
+        # Generate AI insights from today's quiz data
+        try:
+            from stressease.services.ai_insight.ai_insight_service import (
+                generate_ai_insights,
             )
+
+            # Pass the current quiz data directly to insights generation
+            insights_result = generate_ai_insights(user_id, daily_doc)
+            if insights_result:
+                print(f"✓ AI insights generated for user {user_id} on {quiz_date}")
+            else:
+                print(f"⚠ AI insights generation failed for user {user_id}")
+        except Exception as e:
+            # Don't fail the quiz submission if insights generation fails
+            print(f"✗ Error generating AI insights for user {user_id}: {str(e)}")
 
         # After saving, check if we have 7 logs to trigger weekly DASS aggregation
         weekly_result = None
