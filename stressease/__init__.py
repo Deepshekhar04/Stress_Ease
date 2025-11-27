@@ -18,8 +18,8 @@ def create_app():
     app.config.from_object(Config)
 
     # Initialize services
-    from stressease.services.firebase_config import init_firebase
-    from stressease.services.llm_service import init_gemini
+    from stressease.services.utility.firebase_config import init_firebase
+    from stressease.services.chat.llm_service import init_gemini
 
     try:
         # Initialize Firebase

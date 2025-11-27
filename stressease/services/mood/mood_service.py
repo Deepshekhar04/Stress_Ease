@@ -9,12 +9,13 @@ This module handles all mood tracking operations including:
 
 from datetime import datetime, date
 from typing import Dict, List, Optional, Any
-from stressease.services.firebase_config import get_firestore_client
+from stressease.services.utility.firebase_config import get_firestore_client
 
 
 # ============================================================================
 # MOOD QUIZ OPERATIONS
 # ============================================================================
+
 
 def save_daily_mood_log(user_id: str, daily_log: Dict[str, Any]) -> Optional[str]:
     """
@@ -32,14 +33,14 @@ def save_daily_mood_log(user_id: str, daily_log: Dict[str, Any]) -> Optional[str
     db = get_firestore_client()
 
     try:
-        daily_log['user_id'] = user_id
+        daily_log["user_id"] = user_id
         # Default date if not provided
-        if 'date' not in daily_log or not daily_log['date']:
-            daily_log['date'] = date.today().isoformat()
+        if "date" not in daily_log or not daily_log["date"]:
+            daily_log["date"] = date.today().isoformat()
         # Server-side timestamp
-        daily_log['submitted_at'] = datetime.utcnow()
+        daily_log["submitted_at"] = datetime.utcnow()
 
-        doc_ref = db.collection('user_mood_logs').add(daily_log)
+        doc_ref = db.collection("user_mood_logs").add(daily_log)
         return doc_ref[1].id
     except Exception as e:
         print(f"Error saving daily mood log for {user_id}: {str(e)}")
@@ -61,18 +62,18 @@ def get_last_daily_mood_logs(user_id: str, limit: int = 7) -> List[Dict[str, Any
 
     try:
         from firebase_admin import firestore
-        
+
         logs = []
         query = (
-            db.collection('user_mood_logs')
-              .where('user_id', '==', user_id)
-              .order_by('submitted_at', direction=firestore.Query.DESCENDING)
-              .limit(limit)
+            db.collection("user_mood_logs")
+            .where("user_id", "==", user_id)
+            .order_by("submitted_at", direction=firestore.Query.DESCENDING)
+            .limit(limit)
         )
         docs = query.stream()
         for doc in docs:
             entry = doc.to_dict()
-            entry['id'] = doc.id
+            entry["id"] = doc.id
             logs.append(entry)
         return logs
     except Exception as e:
@@ -93,7 +94,7 @@ def get_daily_mood_logs_count(user_id: str) -> int:
     db = get_firestore_client()
 
     try:
-        query = db.collection('user_mood_logs').where('user_id', '==', user_id)
+        query = db.collection("user_mood_logs").where("user_id", "==", user_id)
         count = 0
         for _ in query.stream():
             count += 1
@@ -106,6 +107,7 @@ def get_daily_mood_logs_count(user_id: str) -> int:
 # ============================================================================
 # WEEKLY DASS OPERATIONS
 # ============================================================================
+
 
 def weekly_dass_exists(user_id: str, week_start: str, week_end: str) -> bool:
     """
@@ -123,10 +125,10 @@ def weekly_dass_exists(user_id: str, week_start: str, week_end: str) -> bool:
 
     try:
         query = (
-            db.collection('user_weekly_dass')
-              .where('user_id', '==', user_id)
-              .where('week_start', '==', week_start)
-              .where('week_end', '==', week_end)
+            db.collection("user_weekly_dass")
+            .where("user_id", "==", user_id)
+            .where("week_start", "==", week_start)
+            .where("week_end", "==", week_end)
         )
         docs = query.stream()
         for _ in docs:
@@ -137,8 +139,14 @@ def weekly_dass_exists(user_id: str, week_start: str, week_end: str) -> bool:
         return False
 
 
-def save_weekly_dass_totals(user_id: str, week_start: str, week_end: str,
-                             depression_total: int, anxiety_total: int, stress_total: int) -> Optional[str]:
+def save_weekly_dass_totals(
+    user_id: str,
+    week_start: str,
+    week_end: str,
+    depression_total: int,
+    anxiety_total: int,
+    stress_total: int,
+) -> Optional[str]:
     """
     Save weekly DASS-21 totals to Firestore.
 
@@ -159,16 +167,16 @@ def save_weekly_dass_totals(user_id: str, week_start: str, week_end: str,
 
     try:
         data = {
-            'user_id': user_id,
-            'week_start': week_start,
-            'week_end': week_end,
-            'depression_total': depression_total,
-            'anxiety_total': anxiety_total,
-            'stress_total': stress_total,
-            'calculated_at': datetime.utcnow(),
+            "user_id": user_id,
+            "week_start": week_start,
+            "week_end": week_end,
+            "depression_total": depression_total,
+            "anxiety_total": anxiety_total,
+            "stress_total": stress_total,
+            "calculated_at": datetime.utcnow(),
         }
 
-        doc_ref = db.collection('user_weekly_dass').add(data)
+        doc_ref = db.collection("user_weekly_dass").add(data)
         return doc_ref[1].id
     except Exception as e:
         print(f"Error saving weekly DASS totals for {user_id}: {str(e)}")

@@ -2,7 +2,9 @@
 LangChain-based chat service for StressEase.
 
 This service provides:
-- Dual-model architecture (gemini-2.0-flash for summarization, gemini-2.0-flash-lite for chat)
+- Dual-model architecture with role-based model selection:
+  * base_llm (gemini-2.0-flash-lite): Summarization, insights, resource generation
+  * advance_llm (gemini-2.0-flash-lite): Chat responses (production: gemini-2.0-flash)
 - Mood log summarization (Chain A)
 - Conversational chat with memory (Chain B)
 - Crisis resource generation with structured output
@@ -27,11 +29,11 @@ import json
 # GLOBAL LLM INSTANCES
 # ============================================================================
 
-# Advanced model for summarization tasks (cheaper, faster)
-advance_llm = None
-
-# Base model for chat responses (better quality)
+# Base model for summarization, insights, and resource generation (cheaper, faster)
 base_llm = None
+
+# Advanced model for chat responses (better quality, more context)
+advance_llm = None
 
 
 # ============================================================================
@@ -44,8 +46,8 @@ def init_gemini(api_key: str) -> None:
     Initialize dual Google Gemini models with LangChain.
 
     Sets up two models:
-    - advance_llm: gemini-2.0-flash for summarization (cheaper)
-    - base_llm: gemini-2.0-flash-lite for chat responses (quality)
+    - base_llm: gemini-2.0-flash-lite for summarization, insights, resources
+    - advance_llm: gemini-2.0-flash-lite for chat (will be gemini-2.0-flash in production)
 
     Args:
         api_key (str): Google Gemini API key
@@ -53,28 +55,28 @@ def init_gemini(api_key: str) -> None:
     Raises:
         Exception: If initialization fails
     """
-    global advance_llm, base_llm
+    global base_llm, advance_llm
 
     try:
-        # Advanced model for summarization tasks
-        advance_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+        # Base model for summarization, insights, and resource generation
+        base_llm = ChatGoogleGenerativeAI(
+            model="gemini-2.0-flash-lite",
             google_api_key=api_key,
             temperature=0.3,  # Lower temperature for factual summarization
             convert_system_message_to_human=True,
         )
 
-        # Base model for chat responses
-        base_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash-lite",
+        # Advanced model for chat responses (better quality)
+        advance_llm = ChatGoogleGenerativeAI(
+            model="gemini-2.0-flash-lite",  # Production: gemini-2.0-flash
             google_api_key=api_key,
             temperature=0.7,  # Higher temperature for conversational responses
             convert_system_message_to_human=True,
         )
 
         print("✓ Google Gemini dual-model system initialized successfully")
-        print(f"  - Advance model (summarization): gemini-2.0-flash")
-        print(f"  - Base model (chat): gemini-2.0-flash-lite")
+        print(f"  - Base model (summarization/insights): gemini-2.0-flash-lite")
+        print(f"  - Advanced model (chat): gemini-2.0-flash-lite")
 
     except Exception as e:
         print(f"✗ Failed to initialize Gemini models: {str(e)}")
@@ -90,7 +92,7 @@ def summarize_mood_logs(mood_logs: List[Dict[str, Any]]) -> str:
     """
     Summarize user's mood logs from the past 7 days using Chain A.
 
-    Uses the advance model (gemini-2.0-flash) for cost-effective summarization.
+    Uses the base model (gemini-2.0-flash-lite) for cost-effective summarization.
     Generates a concise 2-3 sentence summary focusing on trends and patterns.
 
     Args:
@@ -102,7 +104,7 @@ def summarize_mood_logs(mood_logs: List[Dict[str, Any]]) -> str:
     Raises:
         RuntimeError: If Gemini models not initialized
     """
-    if advance_llm is None:
+    if base_llm is None:
         raise RuntimeError("Gemini models not initialized. Call init_gemini() first.")
 
     if not mood_logs or len(mood_logs) == 0:
@@ -131,8 +133,8 @@ Provide a brief, empathetic summary:""",
         # Format mood logs for the prompt
         mood_data_text = _format_mood_logs_for_summary(mood_logs)
 
-        # Chain A: Prompt → LLM → Output Parser (LCEL)
-        chain_a = summary_prompt | advance_llm | StrOutputParser()
+        # Chain A: Prompt → Base LLM → Output Parser (LCEL)
+        chain_a = summary_prompt | base_llm | StrOutputParser()
 
         # Execute chain
         summary = chain_a.invoke({"mood_data": mood_data_text})
@@ -195,7 +197,7 @@ def create_conversation_chain(user_context: str) -> Runnable:
     This builds Chain B with:
     - Master prompt with user context (profile + mood summary)
     - MessagesPlaceholder for history
-    - Base LLM for quality responses
+    - Advanced LLM for high-quality chat responses
 
     Args:
         user_context (str): Formatted context (profile + mood summary)
@@ -206,7 +208,7 @@ def create_conversation_chain(user_context: str) -> Runnable:
     Raises:
         RuntimeError: If Gemini models not initialized
     """
-    if base_llm is None:
+    if advance_llm is None:
         raise RuntimeError("Gemini models not initialized. Call init_gemini() first.")
 
     # Build master prompt with user context
@@ -218,8 +220,8 @@ def create_conversation_chain(user_context: str) -> Runnable:
         ]
     )
 
-    # Create LCEL chain: Prompt | LLM | OutputParser
-    chain = prompt | base_llm | StrOutputParser()
+    # Create LCEL chain: Prompt | Advanced LLM | OutputParser
+    chain = prompt | advance_llm | StrOutputParser()
 
     return chain
 
@@ -500,7 +502,7 @@ def find_crisis_resources(country: str) -> Optional[Dict[str, Any]]:
     """
     Generate country-specific crisis resources using structured output.
 
-    Uses the advance model with Pydantic parser for reliable JSON generation.
+    Uses the base model with Pydantic parser for reliable JSON generation.
 
     Args:
         country (str): Country name or code
@@ -511,7 +513,7 @@ def find_crisis_resources(country: str) -> Optional[Dict[str, Any]]:
     Raises:
         RuntimeError: If Gemini models not initialized
     """
-    if advance_llm is None:
+    if base_llm is None:
         raise RuntimeError("Gemini models not initialized. Call init_gemini() first.")
 
     try:
@@ -536,8 +538,8 @@ Country: {country}""",
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
 
-        # Chain: Prompt → LLM → Parser (LCEL)
-        chain = prompt | advance_llm | parser
+        # Chain: Prompt → Base LLM → Parser (LCEL)
+        chain = prompt | base_llm | parser
 
         # Execute chain
         resources = chain.invoke({"country": country})

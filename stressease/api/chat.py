@@ -8,11 +8,11 @@ This module provides:
 """
 
 from flask import Blueprint, request, jsonify
-from stressease.services.auth_service import token_required
-from stressease.services import llm_service
-from stressease.services import chat_memory_service
-from stressease.services import mood_service
-from stressease.services import crisis_resource_service
+from stressease.services.utility.auth_service import token_required
+from stressease.services.chat import llm_service
+from stressease.services.chat import chat_memory_service
+from stressease.services.mood import mood_service
+from stressease.services.chat import crisis_resource_service
 from langchain_core.messages import HumanMessage, AIMessage
 from datetime import datetime
 import uuid

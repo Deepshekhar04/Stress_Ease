@@ -1,8 +1,8 @@
 """Daily mood quiz endpoint only."""
 
 from flask import Blueprint, request, jsonify
-from stressease.services.auth_service import token_required
-from stressease.services.mood_service import (
+from stressease.services.utility.auth_service import token_required
+from stressease.services.mood.mood_service import (
     save_daily_mood_log,
     get_last_daily_mood_logs,
     get_daily_mood_logs_count,
