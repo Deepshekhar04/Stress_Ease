@@ -10,6 +10,7 @@ from stressease.services.mood.mood_service import (
     save_weekly_dass_totals,
     get_daily_mood_log_by_date,
     update_daily_mood_log,
+    get_daily_questions,
 )
 from datetime import datetime, date
 
@@ -255,13 +256,82 @@ def submit_daily_quiz(user_id):
                     500,
                 )
 
-        # Generate AI insights from today's quiz data
+        # Generate AI insights from today's quiz data with context-aware enrichment
         try:
             from stressease.services.ai_insight.ai_insight_service import (
                 generate_ai_insights,
             )
 
-            # Pass the current quiz data directly to insights generation
+            # Extract day_key from payload (default to "day_1" if missing)
+            day_key = payload.get("day_key", "day_1")
+
+            # Fetch questions from Firestore for this day
+            questions = get_daily_questions(day_key)
+
+            if questions:
+                print(f"✓ Fetched {len(questions)} questions for {day_key}")
+
+                # Map scores to question text for enriched Q&A context
+                # Questions structure: [4 core, 5 rotating, 3 DASS] = 12 total
+                enriched_qa = []
+
+                # Core questions (0-3)
+                core_labels = ["mood", "energy", "sleep", "stress"]
+                for i, label in enumerate(core_labels):
+                    if i < len(questions):
+                        q_text = questions[i].get(
+                            "text", f"{label.capitalize()} question"
+                        )
+                        score = core.get(label, 0)
+                        enriched_qa.append(
+                            {
+                                "question": q_text,
+                                "score": score,
+                                "dimension": "core",
+                                "label": label,
+                            }
+                        )
+
+                # Rotating questions (4-8)
+                for i in range(5):
+                    q_idx = 4 + i
+                    if q_idx < len(questions) and i < len(rotating_scores):
+                        q_text = questions[q_idx].get(
+                            "text", f"Rotating question {i+1}"
+                        )
+                        enriched_qa.append(
+                            {
+                                "question": q_text,
+                                "score": rotating_scores[i],
+                                "dimension": "rotating",
+                                "domain": rotating.get("domain_name", "unknown"),
+                            }
+                        )
+
+                # DASS questions (9-11)
+                dass_labels = ["depression", "anxiety", "stress"]
+                for i, label in enumerate(dass_labels):
+                    q_idx = 9 + i
+                    if q_idx < len(questions):
+                        q_text = questions[q_idx].get(
+                            "text", f"{label.capitalize()} question"
+                        )
+                        score = dass.get(label, 0)
+                        enriched_qa.append(
+                            {
+                                "question": q_text,
+                                "score": score,
+                                "dimension": "dass",
+                                "label": label,
+                            }
+                        )
+
+                # Add enriched Q&A to daily_doc
+                daily_doc["enriched_qa"] = enriched_qa
+            else:
+                print(f"⚠ No questions found for {day_key}, using scores only")
+
+            # Pass the enriched quiz data to insights generation
             insights_result = generate_ai_insights(user_id, daily_doc)
             if insights_result:
                 print(f"✓ AI insights generated for user {user_id} on {quiz_date}")

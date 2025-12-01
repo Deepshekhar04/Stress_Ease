@@ -203,6 +203,8 @@ def _build_daily_prompt(quiz_data: Dict[str, Any]) -> str:
     """
     Format daily quiz data into readable text for LLM prompt.
 
+    Prioritizes enriched Q&A format when available for better context.
+
     Args:
         quiz_data (dict): Daily quiz data from mood.py
 
@@ -215,50 +217,106 @@ def _build_daily_prompt(quiz_data: Dict[str, Any]) -> str:
     date = quiz_data.get("date", "Unknown")
     lines.append(f"Date: {date}")
 
-    # Core scores
-    core = quiz_data.get("core_scores", {})
-    if core:
-        lines.append(f"\nCore Metrics:")
-        lines.append(f"  - Mood: {core.get('mood', 'N/A')}/5")
-        lines.append(f"  - Energy: {core.get('energy', 'N/A')}/5")
-        lines.append(f"  - Sleep Quality: {core.get('sleep', 'N/A')}/5")
-        lines.append(f"  - Stress Level: {core.get('stress', 'N/A')}/5")
+    # Check if we have enriched Q&A data
+    enriched_qa = quiz_data.get("enriched_qa", [])
 
-    # DASS scores
-    dass = quiz_data.get("dass_today", {})
-    if dass:
-        lines.append(f"\nMental Health Indicators (DASS-21):")
-        lines.append(f"  - Depression: {dass.get('depression', 'N/A')}/5")
-        lines.append(f"  - Anxiety: {dass.get('anxiety', 'N/A')}/5")
-        lines.append(f"  - Stress: {dass.get('stress', 'N/A')}/5")
+    if enriched_qa:
+        # Use enriched Q&A format for better context
+        lines.append("\n**Today's Quiz Responses (Question & Answer):**\n")
 
-    # Rotating domain
-    rotating = quiz_data.get("rotating_scores", {})
-    if rotating:
-        domain_name = rotating.get("domain_name", "Unknown")
-        scores = rotating.get("scores", [])
-        if scores:
-            avg_domain = sum(scores) / len(scores)
-            lines.append(f"\n{domain_name.capitalize()} Domain:")
-            lines.append(f"  - Average Score: {avg_domain:.1f}/5")
-            lines.append(f"  - Individual Scores: {scores}")
+        # Group by dimension for better readability
+        core_qa = [qa for qa in enriched_qa if qa.get("dimension") == "core"]
+        rotating_qa = [qa for qa in enriched_qa if qa.get("dimension") == "rotating"]
+        dass_qa = [qa for qa in enriched_qa if qa.get("dimension") == "dass"]
 
-    # Calculated averages
-    core_avg = quiz_data.get("core_avg")
-    rotating_avg = quiz_data.get("rotating_avg")
-    if core_avg is not None:
-        lines.append(f"\nOverall Core Average: {core_avg:.2f}/5")
-    if rotating_avg is not None:
-        lines.append(
-            f"Overall {rotating.get('domain_name', 'Domain')} Average: {rotating_avg:.2f}/5"
-        )
+        if core_qa:
+            lines.append("**Core Well-being:**")
+            for qa in core_qa:
+                score = qa.get("score", 0)
+                question = qa.get("question", "")
+                score_label = _get_score_label(score)
+                lines.append(f"  Q: {question}")
+                lines.append(f"  A: {score}/5 ({score_label})")
+                lines.append("")
 
-    # Additional notes
+        if rotating_qa:
+            domain = rotating_qa[0].get("domain", "Life Area")
+            lines.append(f"**{domain.capitalize()} Domain:**")
+            for qa in rotating_qa:
+                score = qa.get("score", 0)
+                question = qa.get("question", "")
+                score_label = _get_score_label(score)
+                lines.append(f"  Q: {question}")
+                lines.append(f"  A: {score}/5 ({score_label})")
+                lines.append("")
+
+        if dass_qa:
+            lines.append("**Mental Health Indicators (DASS-21):**")
+            for qa in dass_qa:
+                score = qa.get("score", 0)
+                question = qa.get("question", "")
+                score_label = _get_score_label(score)
+                lines.append(f"  Q: {question}")
+                lines.append(f"  A: {score}/5 ({score_label})")
+                lines.append("")
+    else:
+        # Fallback to original score-only format
+        # Core scores
+        core = quiz_data.get("core_scores", {})
+        if core:
+            lines.append(f"\nCore Metrics:")
+            lines.append(f"  - Mood: {core.get('mood', 'N/A')}/5")
+            lines.append(f"  - Energy: {core.get('energy', 'N/A')}/5")
+            lines.append(f"  - Sleep Quality: {core.get('sleep', 'N/A')}/5")
+            lines.append(f"  - Stress Level: {core.get('stress', 'N/A')}/5")
+
+        # DASS scores
+        dass = quiz_data.get("dass_today", {})
+        if dass:
+            lines.append(f"\nMental Health Indicators (DASS-21):")
+            lines.append(f"  - Depression: {dass.get('depression', 'N/A')}/5")
+            lines.append(f"  - Anxiety: {dass.get('anxiety', 'N/A')}/5")
+            lines.append(f"  - Stress: {dass.get('stress', 'N/A')}/5")
+
+        # Rotating domain
+        rotating = quiz_data.get("rotating_scores", {})
+        if rotating:
+            domain_name = rotating.get("domain_name", "Unknown")
+            scores = rotating.get("scores", [])
+            if scores:
+                avg_domain = sum(scores) / len(scores)
+                lines.append(f"\n{domain_name.capitalize()} Domain:")
+                lines.append(f"  - Average Score: {avg_domain:.1f}/5")
+                lines.append(f"  - Individual Scores: {scores}")
+
+        # Calculated averages
+        core_avg = quiz_data.get("core_avg")
+        rotating_avg = quiz_data.get("rotating_avg")
+        if core_avg is not None:
+            lines.append(f"\nOverall Core Average: {core_avg:.2f}/5")
+        if rotating_avg is not None:
+            lines.append(
+                f"Overall {rotating.get('domain_name', 'Domain')} Average: {rotating_avg:.2f}/5"
+            )
+
+    # Additional notes (always include if present)
     notes = quiz_data.get("additional_notes", "")
     if notes:
         lines.append(f"\nUser Notes: {notes}")
 
     return "\n".join(lines)
+
+
+def _get_score_label(score: int) -> str:
+    """Convert numeric score to descriptive label."""
+    labels = {
+        1: "Very Poor/Very Low",
+        2: "Poor/Low",
+        3: "Moderate/Average",
+        4: "Good/High",
+        5: "Excellent/Very High",
+    }
+    return labels.get(score, "Unknown")
 
 
 def _validate_insights_structure(insights: Dict[str, Any]) -> bool:

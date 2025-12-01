@@ -222,6 +222,61 @@ def save_weekly_dass_totals(
 
 
 # ============================================================================
+# DAILY QUIZ QUESTION FETCHING
+# ============================================================================
+
+
+def get_daily_questions(day_key: str) -> List[Dict[str, Any]]:
+    """
+    Fetch daily quiz questions from Firestore for context-aware AI insights.
+
+    Args:
+        day_key (str): Day identifier (e.g., "day_1", "day_2")
+
+    Returns:
+        List[Dict]: List of question objects with 'text', 'dimension', 'options', etc.
+                    Returns empty list if not found or invalid structure.
+    """
+    db = get_firestore_client()
+
+    try:
+        doc_ref = db.collection("questions").document(day_key)
+        doc = doc_ref.get()
+
+        if not doc.exists:
+            print(f"⚠ No questions document found for {day_key}")
+            return []
+
+        data = doc.to_dict()
+        questions_field = data.get("questions", [])
+
+        # Handle both List and Map structures (matching frontend logic)
+        if isinstance(questions_field, list):
+            # Direct list of questions
+            return questions_field
+        elif isinstance(questions_field, dict):
+            # Map structure - extract values and sort by key if numeric
+            try:
+                # Try to sort numerically if keys are numbers
+                sorted_keys = sorted(
+                    questions_field.keys(), key=lambda x: int(x) if x.isdigit() else x
+                )
+                return [questions_field[k] for k in sorted_keys]
+            except (ValueError, TypeError):
+                # Fallback to values without sorting
+                return list(questions_field.values())
+        else:
+            print(
+                f"⚠ Unexpected questions field structure for {day_key}: {type(questions_field)}"
+            )
+            return []
+
+    except Exception as e:
+        print(f"✗ Error fetching questions for {day_key}: {str(e)}")
+        return []
+
+
+# ============================================================================
 # DAILY QUIZ DUPLICATE PREVENTION
 # ============================================================================
 
