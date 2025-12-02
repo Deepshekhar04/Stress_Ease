@@ -3,13 +3,11 @@
 from flask import Blueprint, request, jsonify
 from stressease.services.utility.auth_service import token_required
 from stressease.services.mood.mood_service import (
-    save_daily_mood_log,
+    upsert_daily_mood_log,
     get_last_daily_mood_logs,
     get_daily_mood_logs_count,
     weekly_dass_exists,
     save_weekly_dass_totals,
-    get_daily_mood_log_by_date,
-    update_daily_mood_log,
 )
 from datetime import datetime, date
 
@@ -219,41 +217,23 @@ def submit_daily_quiz(user_id):
         if "additional_notes" in payload and payload["additional_notes"]:
             daily_doc["additional_notes"] = payload["additional_notes"]
 
-        # Check if quiz for today already exists (prevent duplicates)
-        quiz_date = daily_doc.get("date") or date.today().isoformat()
-        daily_doc["date"] = quiz_date  # Ensure date is set
+        # Upsert quiz (handles both create and update automatically)
+        result = upsert_daily_mood_log(user_id, daily_doc)
 
-        existing_quiz = get_daily_mood_log_by_date(user_id, quiz_date)
+        if not result:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Database error",
+                        "message": "Failed to save daily mood log",
+                    }
+                ),
+                500,
+            )
 
-        if existing_quiz:
-            # Update existing quiz instead of creating duplicate
-            log_id = existing_quiz["id"]
-            success = update_daily_mood_log(log_id, daily_doc)
-            if not success:
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "Database error",
-                            "message": "Failed to update daily mood log",
-                        }
-                    ),
-                    500,
-                )
-        else:
-            # Save new daily log
-            log_id = save_daily_mood_log(user_id, daily_doc)
-            if not log_id:
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "Database error",
-                            "message": "Failed to save daily mood log",
-                        }
-                    ),
-                    500,
-                )
+        log_id = result["doc_id"]
+        quiz_date = result["date"]
 
         # Generate AI insights from today's quiz data
         try:
