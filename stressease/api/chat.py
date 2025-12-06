@@ -164,6 +164,20 @@ def send_chat_message(user_id):
                 400,
             )
 
+        # Block gibberish (messages without any letters)
+        # TEMPORARILY DISABLED FOR TESTING - See how LLM handles gibberish
+        # if not any(c.isalpha() for c in user_message):
+        #     return (
+        #         jsonify(
+        #             {
+        #                 "success": False,
+        #                 "error": "Invalid message",
+        #                 "message": "Please send a message with words so I can help you.",
+        #             }
+        #         ),
+        #         400,
+        #     )
+
         if len(user_message) > 1000:
             return (
                 jsonify(
@@ -196,13 +210,6 @@ def send_chat_message(user_id):
         ai_response = llm_service.generate_chat_response(
             chain, user_message, history_messages
         )
-
-        # Check if profile is incomplete and add nudge if needed
-        # We can optimize this by caching profile status in session
-        user_profile = chat_memory_service.get_user_profile(user_id)
-        profile_complete = _is_profile_complete(user_profile)
-        if not profile_complete:
-            ai_response = _add_profile_nudge(ai_response)
 
         # Calculate new turn number
         turn_number = len(history_messages) // 2
@@ -247,7 +254,6 @@ def send_chat_message(user_id):
                     },
                     "session_id": session_id,
                     "metadata": {
-                        "profile_complete": profile_complete,
                         "message_count": active_chat_sessions.get(user_id, {})
                         .get(session_id, {})
                         .get("message_count", 0),
@@ -461,38 +467,3 @@ def _create_chain_for_user(user_id):
 
     # Create chain
     return llm_service.create_conversation_chain(user_context)
-
-
-def _is_profile_complete(user_profile):
-    """
-    Check if user profile is complete.
-
-    Args:
-        user_profile (dict): User profile data
-
-    Returns:
-        bool: True if profile is complete, False otherwise
-    """
-    if not user_profile:
-        return False
-
-    # Check for essential profile fields
-    has_name = bool(user_profile.get("name"))
-    has_age = bool(user_profile.get("age"))
-
-    # Consider profile complete if it has at least name and age
-    return has_name and has_age
-
-
-def _add_profile_nudge(ai_response):
-    """
-    Add a gentle profile completion nudge to the AI response.
-
-    Args:
-        ai_response (str): Original AI response
-
-    Returns:
-        str: Response with nudge appended
-    """
-    nudge = "\n\n💡 Tip: Complete your profile for more personalized support."
-    return ai_response + nudge
