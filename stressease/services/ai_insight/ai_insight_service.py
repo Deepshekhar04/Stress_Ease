@@ -29,9 +29,6 @@ class AIInsights(BaseModel):
     summary: str = Field(
         description="2-3 sentence summary of today's mood state and key observations"
     )
-    confidence_score: float = Field(
-        description="Confidence score 0-100 based on score consistency and completeness"
-    )
     motivation_quote: str = Field(
         description="Short motivational quote with emoji, personalized to today's mood"
     )
@@ -123,9 +120,8 @@ Based on today's mood quiz scores, provide personalized insights and suggestions
 **Instructions:**
 1. **Dominant Emotion**: Choose the most fitting emotion based on all scores (Happy/Neutral/Sad/Anxious/Stressed/Energetic/Calm/Tired)
 2. **Summary**: Write 2-3 sentences about today's mood state, highlighting key observations
-3. **Confidence Score**: Rate 0-100 based on score consistency (e.g., high if scores align, lower if conflicting)
-4. **Motivation Quote**: Create a short, encouraging quote with emoji that resonates with today's mood
-5. **Suggestions**: Provide 3-5 specific, actionable suggestions for today/tomorrow addressing detected issues
+3. **Motivation Quote**: Create a short, encouraging quote with emoji that resonates with today's mood
+4. **Suggestions**: Provide 3-5 specific, actionable suggestions for today/tomorrow addressing detected issues
 
 **Tone**: Empathetic, supportive, non-clinical. Avoid medical terminology or diagnosis.
 
@@ -171,7 +167,6 @@ def save_ai_insights_to_firestore(user_id: str, insights: Dict[str, Any]) -> boo
         insights_doc = {
             "dominant_emotion": insights["dominant_emotion"],
             "summary": insights["summary"],
-            "confidence_score": insights["confidence_score"],
             "motivation_quote": insights["motivation_quote"],
             "suggestions": insights["suggestions"],
             "generated_at": datetime.utcnow(),
@@ -332,7 +327,6 @@ def _validate_insights_structure(insights: Dict[str, Any]) -> bool:
     required_fields = {
         "dominant_emotion": str,
         "summary": str,
-        "confidence_score": (int, float),
         "motivation_quote": str,
         "suggestions": list,
     }
@@ -351,11 +345,6 @@ def _validate_insights_structure(insights: Dict[str, Any]) -> bool:
     # Validate suggestions is a list of strings
     if not all(isinstance(s, str) for s in insights["suggestions"]):
         print(f"⚠ Suggestions must be a list of strings")
-        return False
-
-    # Validate confidence_score range
-    if not (0 <= insights["confidence_score"] <= 100):
-        print(f"⚠ Confidence score must be between 0 and 100")
         return False
 
     return True
