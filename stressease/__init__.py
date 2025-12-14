@@ -37,9 +37,11 @@ def create_app():
     # Register blueprints
     from stressease.api.mood import mood_bp
     from stressease.api.chat import chat_bp
+    from stressease.api.predict import predict_bp
 
     app.register_blueprint(mood_bp, url_prefix="/api/mood")
     app.register_blueprint(chat_bp, url_prefix="/api/chat")
+    app.register_blueprint(predict_bp, url_prefix="/api")
 
     # Global error handlers
     @app.errorhandler(400)
@@ -107,7 +109,11 @@ def create_app():
                 {
                     "message": "Welcome to StressEase Backend API",
                     "version": "1.0.0",
-                    "endpoints": {"mood": "/api/mood", "chat": "/api/chat"},
+                    "endpoints": {
+                        "mood": "/api/mood",
+                        "chat": "/api/chat",
+                        "predict": "/api/predict",
+                    },
                 }
             ),
             200,
