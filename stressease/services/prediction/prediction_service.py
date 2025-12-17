@@ -114,25 +114,50 @@ def _predict_with_llm(
         prompt_template = PromptTemplate(
             template="""You are an AI assistant analyzing mental health metrics to predict stress levels.
 
-Given the following 7-day averages:
-- Average Mood Score: {avg_mood_score}/5.0 (where 1=Very Poor, 5=Excellent)
-- Chat Sessions Count: {chat_count} (seeking support/venting sessions)
-- Average Quiz Score: {avg_quiz_score}/60 (sum of 12 daily questions, each 1-5)
+**User's 7-Day Mental Health Summary:**
+
+1. **Quiz Breakdown** (12 questions daily, 1-5 scale):
+   - Average Total Score: {avg_quiz_score}/60
+   - This comprehensive score combines three dimensions:
+     • **Core Wellness** (4 questions): Mood, Energy, Sleep, Stress
+     • **Life Domains** (5 questions): Social, Work, Finance, etc.
+     • **DASS-21 Indicators** (3 questions): Depression, Anxiety, Stress
+
+2. **Mood Trend**: {avg_mood_score}/5.0
+   - Scale: 1=Very Poor, 2=Poor, 3=Neutral, 4=Good, 5=Excellent
+   - This represents general emotional well-being separate from stress
+   - Lower scores indicate deteriorating mental state
+
+3. **Support-Seeking Behavior**: {chat_count} chat sessions
+   - Indicates user actively seeking help and coping support
+   - Higher count suggests struggling and proactively managing stress
+   - Zero sessions: Either doing well OR avoiding help (check other metrics)
 
 **Prediction Task:**
 Predict the probability that the user will experience HIGH stress tomorrow.
 
-**Guidelines:**
-- Lower mood scores (1-2) suggest higher stress risk
-- Higher chat count suggests user is struggling/seeking more support
-- Lower quiz scores (12-30) indicate poor overall wellness, higher stress risk
-- Stress probability should be between 0.0 and 1.0
-- Label: "High" if probability >= 0.7, "Medium" if 0.4-0.69, "Low" if < 0.4
-- Confidence: How certain you are about this prediction (0.0 to 1.0)
+**Score Interpretation Guidelines:**
+
+**Quiz Score Ranges:**
+- **Low (12-30)**: Critical wellness issues, very high stress risk
+- **Medium-Low (31-40)**: Significant challenges, elevated stress risk
+- **Medium (41-50)**: Some challenges, moderate stress risk
+- **High (51-60)**: Good overall wellness, low stress risk
+
+**Pattern Analysis:**
+- Low quiz + high chat count = Actively struggling but seeking help (still high risk)
+- Low quiz + low chat count = Isolation/avoidance (very high risk, concerning)
+- High quiz + high chat count = Proactive wellness management (lower risk)
+- High quiz + low chat count = Self-sufficient or naturally resilient (low risk)
+
+**Confidence Guidelines:**
+- **High confidence (0.8-1.0)**: All three metrics align clearly
+- **Medium confidence (0.5-0.7)**: Mixed signals or borderline values
+- **Low confidence (0.3-0.5)**: Contradictory patterns or extreme edge cases
 
 {format_instructions}
 
-Analyze and predict:""",
+Analyze the metrics holistically and predict:""",
             input_variables=["avg_mood_score", "chat_count", "avg_quiz_score"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
