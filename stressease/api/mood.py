@@ -216,6 +216,8 @@ def submit_daily_quiz(user_id):
             # Optionally include averages for analytics convenience
             "core_avg": core_avg,
             "rotating_avg": rotating_avg,
+            # Store total score for prediction calculations (12-60 range)
+            "daily_total_score": sum(all_scores),
         }
         if "additional_notes" in payload and payload["additional_notes"]:
             daily_doc["additional_notes"] = payload["additional_notes"]
