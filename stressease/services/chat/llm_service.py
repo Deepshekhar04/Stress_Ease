@@ -83,6 +83,36 @@ def init_gemini(api_key: str) -> None:
         raise
 
 
+def get_base_model():
+    """
+    Get the base LLM model instance.
+
+    Returns:
+        ChatGoogleGenerativeAI: Base model for summarization/analytics
+
+    Raises:
+        RuntimeError: If models not initialized
+    """
+    if base_llm is None:
+        raise RuntimeError("Gemini models not initialized. Call init_gemini() first.")
+    return base_llm
+
+
+def get_advance_model():
+    """
+    Get the advanced LLM model instance.
+
+    Returns:
+        ChatGoogleGenerativeAI: Advanced model for chat responses
+
+    Raises:
+        RuntimeError: If models not initialized
+    """
+    if advance_llm is None:
+        raise RuntimeError("Gemini models not initialized. Call init_gemini() first.")
+    return advance_llm
+
+
 # ============================================================================
 # CHAIN A: MOOD LOG SUMMARIZATION
 # ============================================================================
