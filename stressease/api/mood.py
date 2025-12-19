@@ -9,7 +9,6 @@ from stressease.services.mood.mood_service import (
     weekly_dass_exists,
     save_weekly_dass_totals,
     get_daily_mood_log_by_date,
-    update_daily_mood_log,
     get_daily_questions,
 )
 from datetime import datetime, date

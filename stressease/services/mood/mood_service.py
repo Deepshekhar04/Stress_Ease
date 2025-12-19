@@ -47,23 +47,22 @@ def upsert_daily_mood_log(
         date_str = daily_log.get("date") or date.today().isoformat()
         daily_log["date"] = date_str
 
-        # Composite document ID: {user_id}_{date}
-        doc_id = f"{user_id}_{date_str}"
-
-        # Set user_id
-        daily_log["user_id"] = user_id
-
         # Add server timestamp
         daily_log["submitted_at"] = datetime.utcnow()
 
-        # Upsert: creates if new, overwrites if exists
-        # This is naturally idempotent - same request multiple times = same result
-        doc_ref = db.collection("user_mood_logs").document(doc_id)
+        # Upsert to nested collection: users/{uid}/moodLogs/{date}
+        # Document ID is just the date (user_id is in the path)
+        doc_ref = (
+            db.collection("users")
+            .document(user_id)
+            .collection("moodLogs")
+            .document(date_str)
+        )
         doc_ref.set(daily_log)
 
-        print(f"✓ Upserted mood log: {doc_id}")
+        print(f"✓ Upserted mood log for user {user_id}: {date_str}")
 
-        return {"doc_id": doc_id, "date": date_str, "operation": "upsert"}
+        return {"doc_id": date_str, "date": date_str, "operation": "upsert"}
 
     except Exception as e:
         print(f"✗ Error upserting mood log for {user_id}: {str(e)}")
@@ -87,9 +86,11 @@ def get_last_daily_mood_logs(user_id: str, limit: int = 7) -> List[Dict[str, Any
         from firebase_admin import firestore
 
         logs = []
+        # Query nested collection: users/{uid}/moodLogs
         query = (
-            db.collection("user_mood_logs")
-            .where("user_id", "==", user_id)
+            db.collection("users")
+            .document(user_id)
+            .collection("moodLogs")
             .order_by("submitted_at", direction=firestore.Query.DESCENDING)
             .limit(limit)
         )
@@ -112,12 +113,13 @@ def get_daily_mood_logs_count(user_id: str) -> int:
         user_id (str): Firebase Auth user ID
 
     Returns:
-        int: Total count of documents in user_mood_logs for the user
+        int: Total count of documents in users/{uid}/moodLogs for the user
     """
     db = get_firestore_client()
 
     try:
-        query = db.collection("user_mood_logs").where("user_id", "==", user_id)
+        # Count documents in nested collection: users/{uid}/moodLogs
+        query = db.collection("users").document(user_id).collection("moodLogs")
         count = 0
         for _ in query.stream():
             count += 1
@@ -147,16 +149,16 @@ def weekly_dass_exists(user_id: str, week_start: str, week_end: str) -> bool:
     db = get_firestore_client()
 
     try:
-        query = (
-            db.collection("user_weekly_dass")
-            .where("user_id", "==", user_id)
-            .where("week_start", "==", week_start)
-            .where("week_end", "==", week_end)
+        # Check nested collection: users/{uid}/weeklyDass/{week_start}_{week_end}
+        doc_id = f"{week_start}_{week_end}"
+        doc_ref = (
+            db.collection("users")
+            .document(user_id)
+            .collection("weeklyDass")
+            .document(doc_id)
         )
-        docs = query.stream()
-        for _ in docs:
-            return True
-        return False
+        doc = doc_ref.get()
+        return doc.exists
     except Exception as e:
         print(f"Error checking weekly DASS existence for {user_id}: {str(e)}")
         return False
@@ -173,7 +175,7 @@ def save_weekly_dass_totals(
     """
     Save weekly DASS-21 totals to Firestore.
 
-    Collection: user_weekly_dass
+    Collection: users/{uid}/weeklyDass
 
     Args:
         user_id (str): Firebase Auth user ID
@@ -190,7 +192,6 @@ def save_weekly_dass_totals(
 
     try:
         data = {
-            "user_id": user_id,
             "week_start": week_start,
             "week_end": week_end,
             "depression_total": depression_total,
@@ -199,8 +200,17 @@ def save_weekly_dass_totals(
             "calculated_at": datetime.utcnow(),
         }
 
-        doc_ref = db.collection("user_weekly_dass").add(data)
-        return doc_ref[1].id
+        # Document ID is the week range
+        doc_id = f"{week_start}_{week_end}"
+        doc_ref = (
+            db.collection("users")
+            .document(user_id)
+            .collection("weeklyDass")
+            .document(doc_id)
+        )
+        doc_ref.set(data)
+
+        return doc_id
     except Exception as e:
         print(f"Error saving weekly DASS totals for {user_id}: {str(e)}")
         return None
@@ -280,14 +290,16 @@ def get_daily_mood_log_by_date(user_id: str, date_str: str) -> Optional[Dict[str
     db = get_firestore_client()
 
     try:
-        query = (
-            db.collection("user_mood_logs")
-            .where("user_id", "==", user_id)
-            .where("date", "==", date_str)
-            .limit(1)
+        # Direct document access in nested collection: users/{uid}/moodLogs/{date}
+        doc_ref = (
+            db.collection("users")
+            .document(user_id)
+            .collection("moodLogs")
+            .document(date_str)
         )
-        docs = query.stream()
-        for doc in docs:
+        doc = doc_ref.get()
+
+        if doc.exists:
             data = doc.to_dict()
             data["id"] = doc.id
             return data
@@ -295,25 +307,3 @@ def get_daily_mood_log_by_date(user_id: str, date_str: str) -> Optional[Dict[str
     except Exception as e:
         print(f"Error checking daily mood log for {user_id} on {date_str}: {str(e)}")
         return None
-
-
-def update_daily_mood_log(doc_id: str, daily_log: Dict[str, Any]) -> bool:
-    """
-    Update an existing daily mood log.
-
-    Args:
-        doc_id (str): Document ID to update
-        daily_log (dict): Updated log data
-
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    db = get_firestore_client()
-
-    try:
-        daily_log["submitted_at"] = datetime.utcnow()  # Update timestamp
-        db.collection("user_mood_logs").document(doc_id).update(daily_log)
-        return True
-    except Exception as e:
-        print(f"Error updating daily mood log {doc_id}: {str(e)}")
-        return False
