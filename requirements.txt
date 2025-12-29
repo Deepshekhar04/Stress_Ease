@@ -14,6 +14,9 @@ langchain-community==0.4.1
 # LangChain Google Gemini Integration
 langchain-google-genai==3.2.0
 
+# SerpApi for Emergency Contact Search
+google-search-results==2.4.2
+
 # Additional dependencies for LangChain
 pydantic==2.12.4
 pydantic-core==2.41.5

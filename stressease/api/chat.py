@@ -39,8 +39,12 @@ active_chat_sessions = {}
 @token_required
 def get_crisis_resources(user_id):
     """
-    Get country-specific crisis resources.
-    Triggered when user selects a country from dropdown in the SOS section.
+    Get country-specific crisis resources with intelligent caching.
+
+    NEW: Uses SerpApi + LLM for real-time web search when cache is stale.
+    - Cache TTL: 30 days
+    - Returns exactly 5 contacts (1 emergency + 4 mental health)
+    - Graceful fallback to cache if search fails
 
     Query Parameters:
         country (str): Country name selected from dropdown
@@ -49,6 +53,8 @@ def get_crisis_resources(user_id):
         JSON response with country-specific crisis resources
     """
     try:
+        from stressease.services.sos import get_sos_contacts
+
         # Get country from query parameter
         country = request.args.get("country", "").strip()
 
@@ -56,23 +62,22 @@ def get_crisis_resources(user_id):
         if not country:
             country = "India"
 
-        # Check cache first
-        cached_resources = crisis_resource_service.get_cached_crisis_resources(country)
+        # Get SOS contacts using intelligent service
+        # This will:
+        # 1. Return cached data if fresh (< 30 days)
+        # 2. Fetch fresh data if stale (>= 30 days)
+        # 3. Fallback to cache if fetch fails
+        resources = get_sos_contacts(country)
 
-        if cached_resources:
-            response = jsonify(
-                {
-                    "success": True,
-                    "message": "Crisis resources retrieved from cache",
-                    "resources": cached_resources,
-                    "source": "cache",
-                }
-            )
-            response.headers["Content-Type"] = "application/json; charset=utf-8"
-            return response, 200
+        if not resources:
+            # Ultimate fallback - try old LLM method
+            print(f"⚠ SOS service failed for {country}, trying fallback LLM method")
+            resources = llm_service.find_crisis_resources(country)
 
-        # Cache miss - generate using Gemini
-        resources = llm_service.find_crisis_resources(country)
+            if resources:
+                # Cache the LLM-generated resources
+                crisis_resource_service.cache_crisis_resources(country, resources)
+
         if not resources:
             response = jsonify(
                 {
@@ -83,25 +88,24 @@ def get_crisis_resources(user_id):
             response.headers["Content-Type"] = "application/json; charset=utf-8"
             return response, 404
 
-        # Cache the new resources
-        cache_success = crisis_resource_service.cache_crisis_resources(
-            country, resources
-        )
+        # Determine source for transparency
+        cached_at = resources.get("cached_at")
+        source_type = "cache" if cached_at else "generated"
 
         # Return the resources
         response = jsonify(
             {
                 "success": True,
-                "message": "Crisis resources generated using AI",
+                "message": f"Crisis resources retrieved successfully",
                 "resources": resources,
-                "source": "generated",
-                "cached": cache_success,
+                "source": source_type,
             }
         )
         response.headers["Content-Type"] = "application/json; charset=utf-8"
         return response, 200
 
     except Exception as e:
+        print(f"❌ Error in get_crisis_resources: {str(e)}")
         response = jsonify(
             {
                 "success": False,
