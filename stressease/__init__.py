@@ -43,7 +43,7 @@ def create_app():
     app.register_blueprint(mood_bp, url_prefix="/api/mood")
     app.register_blueprint(chat_bp, url_prefix="/api/chat")
     app.register_blueprint(predict_bp, url_prefix="/api")
-    app.register_blueprint(analytics_bp, url_prefix="/analytics")
+    app.register_blueprint(analytics_bp, url_prefix="/api/analytics")
 
     # Global error handlers
     @app.errorhandler(400)
@@ -115,7 +115,7 @@ def create_app():
                         "mood": "/api/mood",
                         "chat": "/api/chat",
                         "predict": "/api/predict",
-                        "analytics": "/analytics",
+                        "analytics": "/api/analytics",
                     },
                 }
             ),
