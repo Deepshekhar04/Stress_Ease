@@ -7,6 +7,9 @@ A Flask-based REST API for mental health support, featuring AI-powered chat assi
 - **AI Chat Support** - Empathetic conversational AI using Google Gemini with crisis detection
 - **Mood Tracking** - Daily 12-question mood quiz with DASS-21 integration
 - **Crisis Resources** - Country-specific emergency helplines and mental health resources
+- **SOS Emergency Contacts** - Real-time emergency contacts with agentic architecture (SerpApi + LLM)
+- **Analytics & Predictions** - 7-day trend analysis with hybrid prediction (rule-based + LLM explanations)
+- **Stress Prediction** - LLM-powered stress forecasting based on mood, chat, and quiz data
 - **Session Management** - Persistent chat sessions with conversation history
 - **Dual-Model LLM** - Optimized AI architecture for cost and performance
 - **Firebase Integration** - Secure authentication and real-time data storage
@@ -28,10 +31,26 @@ A Flask-based REST API for mental health support, featuring AI-powered chat assi
 - Context-aware emotional support
 - Temperature: 0.7 (creative, empathetic)
 
+### SOS Agentic Architecture
+
+The SOS emergency contacts feature uses an intelligent multi-agent workflow:
+
+1. **Smart Caching Layer**: Checks Firestore cache with 30-day TTL
+2. **Web Search Agent**: Uses SerpApi to search for current emergency contacts when cache is stale
+3. **LLM Extraction Agent**: Base model (gemini-2.0-flash-lite) extracts and structures contact data:
+   - Exactly 5 contacts (1 national emergency + 4 mental health crisis hotlines)
+   - Validates official sources (.gov, .org domains)
+   - Ensures current 2025 information
+4. **Validation Agent**: Verifies data structure and completeness
+5. **Fallback Mechanism**: Returns cached data if fresh fetch fails
+
+This architecture ensures users always get reliable, up-to-date emergency contacts while minimizing API costs through intelligent caching.
+
 ### Technology Stack
 
 - **Framework**: Flask 2.3.3
 - **AI/ML**: LangChain 1.1.0, Google Gemini API
+- **Web Search**: SerpApi for real-time emergency contact data
 - **Database**: Firebase Firestore
 - **Auth**: Firebase Authentication (handled by Android app)
 - **Language**: Python 3.8+
@@ -130,7 +149,19 @@ Authorization: Bearer <firebase_id_token>
 
 - **POST** `/api/chat/message` - Send chat message. Creates new session if `session_id` is null. Returns AI response with crisis detection, personalized context, and conversation history (last 25 messages).
 - **POST** `/api/chat/end-session` - End chat session and cleanup server resources.
-- **GET** `/api/chat/crisis-resources?country=<country>` - Get country-specific emergency services, crisis hotlines, and mental health resources (cached for performance).
+- **GET/POST** `/api/chat/crisis-resources?country=<country>` - Get country-specific emergency services, crisis hotlines, and mental health resources. Uses agentic architecture with SerpApi + LLM for real-time data when cache is stale (30-day TTL). Returns exactly 5 contacts with graceful fallback.
+
+### Stress Prediction
+
+- **POST** `/api/predict` - Predict tomorrow's stress level using 7-day metrics. Calculates backend-verified `avgQuizScore` from Firestore, accepts `avgMoodScore` (1.0-5.0) and `chatCount` (0-999). Returns stress probability, label (Low/Medium/High), confidence score, and LLM-generated explanation.
+
+### Analytics
+
+- **POST** `/api/analytics/final-summary` - Generate comprehensive 7-day analytics summary. Backend fetches mood logs internally. Returns:
+  - **Summary**: `avg_mood`, `avg_stress`, `dominant_issue` (depression/anxiety/stress)
+  - **Trends**: Mood and stress trends (increasing/declining/stable)
+  - **Prediction**: Hybrid prediction with rule-based state determination and LLM-generated human-relatable explanation
+  - **Metadata**: Data quality assessment and recommendations
 
 ---
 
