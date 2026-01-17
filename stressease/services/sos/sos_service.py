@@ -7,7 +7,7 @@ data extraction and validation.
 """
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Any, List
 from serpapi import GoogleSearch
 from config import Config
@@ -402,7 +402,7 @@ def is_cache_valid(cached_data: Dict[str, Any], ttl_days: int = 30) -> bool:
             cache_time = cached_at
 
         # Calculate age
-        age = datetime.utcnow() - cache_time
+        age = datetime.now(timezone.utc) - cache_time
 
         # Check if within TTL
         is_valid = age.days < ttl_days
