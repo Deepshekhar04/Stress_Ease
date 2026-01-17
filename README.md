@@ -31,20 +31,20 @@ A Flask-based REST API for mental health support, featuring AI-powered chat assi
 - Context-aware emotional support
 - Temperature: 0.7 (creative, empathetic)
 
-### SOS Agentic Architecture
-
-The SOS emergency contacts feature uses an intelligent multi-agent workflow:
-
-1. **Smart Caching Layer**: Checks Firestore cache with 30-day TTL
-2. **Web Search Agent**: Uses SerpApi to search for current emergency contacts when cache is stale
-3. **LLM Extraction Agent**: Base model (gemini-2.0-flash-lite) extracts and structures contact data:
-   - Exactly 5 contacts (1 national emergency + 4 mental health crisis hotlines)
-   - Validates official sources (.gov, .org domains)
-   - Ensures current 2025 information
-4. **Validation Agent**: Verifies data structure and completeness
-5. **Fallback Mechanism**: Returns cached data if fresh fetch fails
-
-This architecture ensures users always get reliable, up-to-date emergency contacts while minimizing API costs through intelligent caching.
+### SOS Tool-Based Pipeline Architecture
+ 
+ The SOS emergency contacts feature uses a robust **multi-stage linear pipeline** for reliability and speed:
+ 
+ 1. **Smart Caching Layer**: Checks Firestore cache with 30-day TTL.
+ 2. **Web Search Stage**: Uses SerpApi to deterministically execute 3 targeted search queries when cache is stale.
+ 3. **LLM Extraction Stage**: Base model (gemini-2.0-flash-lite) processes the raw search results to extract and structure contact data:
+    - Exactly 5 contacts (1 national emergency + 4 mental health crisis hotlines)
+    - Validates official sources (.gov, .org domains)
+    - Ensures information is current for the present year.
+ 4. **Validation Stage**: Verifies data structure, contact counts, and required fields before accepting the result.
+ 5. **Fallback Mechanism**: Returns cached data if fresh fetch fails to ensure user safety.
+ 
+ This **deterministic tool-based pipeline** ensures users always get reliable, up-to-date emergency contacts with 100% consistency, avoiding the unpredictability of autonomous agents in critical safety scenarios.
 
 ### Technology Stack
 

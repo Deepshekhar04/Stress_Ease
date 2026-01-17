@@ -149,20 +149,21 @@ def search_emergency_contacts(country: str) -> List[Dict[str, Any]]:
 
         all_results = []
 
+        # Get dynamic current year
+        current_year = datetime.now().year
+
         # Query 1: Emergency services
-        query1 = f"{country} emergency number national emergency police ambulance 2025"
+        query1 = f"{country} emergency number national emergency police ambulance {current_year}"
         results1 = execute_serpapi_search(query1, api_key)
         all_results.extend(results1)
 
         # Query 2: Mental health crisis hotlines
-        query2 = (
-            f"{country} mental health crisis hotline suicide prevention 2025 official"
-        )
+        query2 = f"{country} mental health crisis hotline suicide prevention {current_year} official"
         results2 = execute_serpapi_search(query2, api_key)
         all_results.extend(results2)
 
         # Query 3: Verified organizations
-        query3 = f"{country} crisis helpline phone number website 2025"
+        query3 = f"{country} crisis helpline phone number website {current_year}"
         results3 = execute_serpapi_search(query3, api_key)
         all_results.extend(results3)
 
@@ -271,6 +272,8 @@ def create_extraction_prompt(country: str, search_summary: str) -> str:
     Returns:
         str: Formatted prompt for LLM
     """
+    current_year = datetime.now().year
+
     prompt = f"""You are an emergency contact information specialist.
 
 Task: Extract EXACTLY 5 emergency and crisis contacts for {country} from the search results below.
@@ -279,7 +282,7 @@ CRITICAL Requirements:
 1. First contact MUST be the national emergency number (e.g., 112 for India, 911 for USA, 999 for UK)
 2. Next 4 contacts MUST be mental health crisis hotlines (suicide prevention, crisis support)
 3. Prioritize OFFICIAL sources (.gov, .org domains)
-4. Verify all information is current (2025)
+4. Verify all information is current ({current_year})
 5. Extract EXACTLY 5 contacts - no more, no less
 
 Output ONLY valid JSON in this EXACT format (no markdown, no code blocks):
