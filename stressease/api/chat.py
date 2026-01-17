@@ -2,9 +2,13 @@
 Chat API endpoints with LangChain integration.
 
 This module provides:
-- POST /message - Send chat message with implicit session creation
-- POST /end-session - End chat session and cleanup resources
+- POST /message - Send chat message with implicit session creation and auto-cleanup
 - GET /crisis-resources - Get country-specific crisis resources
+
+Session Management:
+- Max 2 active sessions per user
+- Automatic cleanup of oldest session when limit exceeded
+- Chat history preserved in Firestore
 """
 
 from flask import Blueprint, request, jsonify
@@ -28,6 +32,42 @@ chat_bp = Blueprint("chat", __name__)
 # ============================================================================
 # Format: {user_id: {session_id: {'chain': runnable, 'last_activity': timestamp, 'message_count': int}}}
 active_chat_sessions = {}
+
+
+def cleanup_old_sessions(user_id: str, max_sessions: int = 2):
+    """
+    Auto-cleanup oldest sessions when user exceeds session limit.
+
+    Preserves chat history in Firestore, only cleans:
+    - In-memory cache (active_chat_sessions dict)
+    - Session status in Firestore (marks as "ended")
+
+    Args:
+        user_id (str): User ID
+        max_sessions (int): Maximum active sessions per user (default: 2)
+    """
+    if user_id not in active_chat_sessions:
+        return
+
+    user_sessions = active_chat_sessions[user_id]
+    session_count = len(user_sessions)
+
+    if session_count >= max_sessions:
+        # Find oldest session by last_activity
+        oldest_session = min(user_sessions.items(), key=lambda x: x[1]["last_activity"])
+        session_id_to_remove = oldest_session[0]
+
+        # Remove from memory
+        del active_chat_sessions[user_id][session_id_to_remove]
+
+        # Mark as ended in Firestore (preserves messages)
+        threading.Thread(
+            target=chat_memory_service.end_session, args=(user_id, session_id_to_remove)
+        ).start()
+
+        print(
+            f"✓ Auto-cleanup: Removed oldest session {session_id_to_remove[:8]} for user {user_id}"
+        )
 
 
 # ============================================================================
@@ -282,89 +322,6 @@ def send_chat_message(user_id):
 
 
 # ============================================================================
-# SESSION MANAGEMENT ENDPOINT
-# ============================================================================
-
-
-@chat_bp.route("/end-session", methods=["POST"])
-@token_required
-def end_chat_session(user_id):
-    """
-    End a chat session and cleanup server-side resources.
-
-    Expected JSON payload:
-    {
-        "session_id": "a1b2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6"
-    }
-
-    Returns:
-        JSON response confirming session cleanup
-    """
-    try:
-        # Get and validate JSON data
-        request_data = request.get_json()
-        if not request_data:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Invalid request",
-                        "message": "JSON data is required",
-                    }
-                ),
-                400,
-            )
-
-        # Extract and validate session_id
-        session_id = request_data.get("session_id", "").strip()
-        if not session_id:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Missing session_id",
-                        "message": "session_id is required",
-                    }
-                ),
-                400,
-            )
-
-        cleanup_count = 0
-
-        # Clean up in-memory session
-        if (
-            user_id in active_chat_sessions
-            and session_id in active_chat_sessions[user_id]
-        ):
-            del active_chat_sessions[user_id][session_id]
-            cleanup_count += 1
-
-        # Mark session as ended in Firestore (async)
-        threading.Thread(
-            target=chat_memory_service.end_session, args=(user_id, session_id)
-        ).start()
-
-        return (
-            jsonify(
-                {
-                    "success": True,
-                    "message": "Session ended successfully",
-                    "cleanup_count": cleanup_count,
-                }
-            ),
-            200,
-        )
-
-    except Exception as e:
-        return (
-            jsonify(
-                {"success": False, "error": "Failed to end session", "message": str(e)}
-            ),
-            500,
-        )
-
-
-# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
@@ -388,6 +345,9 @@ def _load_session(session_id, user_id):
         # Case 1: No session_id provided - create new session
         if not session_id:
             session_id = str(uuid.uuid4())
+
+            # Auto-cleanup if user has too many active sessions
+            cleanup_old_sessions(user_id, max_sessions=2)
 
             # Create session metadata in Firestore (async)
             threading.Thread(
