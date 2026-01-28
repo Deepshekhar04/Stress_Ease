@@ -48,3 +48,18 @@ class Config:
                 f"Firebase credentials file not found at: {cls.FIREBASE_CREDENTIALS_PATH}. "
                 "Please ensure the file exists and the path is correct."
             )
+
+        # Production-specific validation
+        if not cls.DEBUG:
+            if cls.SECRET_KEY == "dev-secret-key-change-in-production":
+                raise ValueError(
+                    "SECRET_KEY must be changed from default value in production. "
+                    "Set a secure SECRET_KEY in your environment variables."
+                )
+
+    @classmethod
+    def setup_logging(cls):
+        """Set up application logging based on DEBUG flag."""
+        from stressease.services.utility.logger import setup_logging
+
+        setup_logging(debug=cls.DEBUG)
