@@ -4,6 +4,9 @@ from flask import Blueprint, request, jsonify
 from typing import Optional, Tuple
 from stressease.services.utility.auth_service import token_required
 from stressease.services.prediction.prediction_service import predict_stress
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Create the predict blueprint
 predict_bp = Blueprint("predict", __name__)
@@ -41,7 +44,7 @@ def _calculate_avg_quiz_score(user_id: str) -> Tuple[Optional[float], int]:
     avg = sum(scores) / len(scores)
     days_count = len(scores)
 
-    print(f"✓ Calculated avgQuizScore from {days_count} day(s): {avg:.2f}")
+    logger.debug(f"Calculated avgQuizScore: {avg:.2f} from {days_count} day(s)")
     return round(avg, 2), days_count
 
 
@@ -78,20 +81,21 @@ def predict(user_id):
     }
     """
     try:
-        # DEBUG: Log incoming request details
-        print(f"\n{'='*60}")
-        print(f"📥 Incoming /api/predict request from user: {user_id}")
-        print(f"Headers: {dict(request.headers)}")
-        print(f"{'='*60}\n")
-
         payload = request.get_json()
-        print(f"📦 Payload received: {payload}")
+        logger.debug(
+            f"Predict endpoint called",
+            extra={
+                "user_id": user_id,
+                "payload_keys": list(payload.keys()) if payload else [],
+            },
+        )
 
         if not payload:
             return (
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "INVALID_REQUEST",
                         "error": "Invalid request",
                         "message": "JSON body required",
                     }
@@ -119,10 +123,15 @@ def predict(user_id):
             if frontend_avg_quiz_score is not None:
                 diff = abs(frontend_avg_quiz_score - backend_avg_quiz_score)
                 if diff > 0.5:  # Allow small rounding differences
-                    print(f"⚠️ Quiz score mismatch for user {user_id}:")
-                    print(f"   Frontend: {frontend_avg_quiz_score}")
-                    print(f"   Backend: {backend_avg_quiz_score} (using this)")
-                    print(f"   Difference: {diff:.2f}")
+                    logger.warning(
+                        f"Quiz score mismatch",
+                        extra={
+                            "user_id": user_id,
+                            "frontend": frontend_avg_quiz_score,
+                            "backend": backend_avg_quiz_score,
+                            "difference": diff,
+                        },
+                    )
         else:
             # Backend calculation failed - fallback to frontend
             if frontend_avg_quiz_score is None:
@@ -130,6 +139,7 @@ def predict(user_id):
                     jsonify(
                         {
                             "success": False,
+                            "error_code": "INSUFFICIENT_DATA",
                             "error": "Insufficient Data",
                             "message": "Please complete at least one daily quiz before requesting predictions",
                         }
@@ -137,8 +147,9 @@ def predict(user_id):
                     400,
                 )
 
-            print(
-                f"⚠️ Backend quiz calculation failed, using frontend value: {frontend_avg_quiz_score}"
+            logger.warning(
+                f"Backend quiz calculation failed, using frontend value",
+                extra={"user_id": user_id, "frontend_value": frontend_avg_quiz_score},
             )
             avg_quiz_score = frontend_avg_quiz_score
             data_source = "frontend"
@@ -150,6 +161,7 @@ def predict(user_id):
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "VALIDATION_ERROR",
                         "error": "Missing required fields",
                         "message": "avgMoodScore and chatCount are required",
                     }
@@ -209,7 +221,6 @@ def predict(user_id):
                 400,
             )
 
-
         # Call prediction service
         prediction = predict_stress(avg_mood_score, chat_count, avg_quiz_score)
 
@@ -231,8 +242,19 @@ def predict(user_id):
         )
 
     except Exception as e:
-        print(f"✗ Error in /api/predict for user {user_id}: {str(e)}")
+        logger.error(
+            f"Error in /api/predict: {str(e)}",
+            extra={"user_id": user_id},
+            exc_info=True,
+        )
         return (
-            jsonify({"success": False, "error": "Server error", "message": str(e)}),
+            jsonify(
+                {
+                    "success": False,
+                    "error_code": "SERVER_ERROR",
+                    "error": "Server error",
+                    "message": str(e),
+                }
+            ),
             500,
         )

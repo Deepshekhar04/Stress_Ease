@@ -21,6 +21,9 @@ from langchain_core.messages import HumanMessage, AIMessage
 from datetime import datetime
 import uuid
 import threading
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Create the chat blueprint
@@ -65,8 +68,9 @@ def cleanup_old_sessions(user_id: str, max_sessions: int = 2):
             target=chat_memory_service.end_session, args=(user_id, session_id_to_remove)
         ).start()
 
-        print(
-            f"✓ Auto-cleanup: Removed oldest session {session_id_to_remove[:8]} for user {user_id}"
+        logger.info(
+            f"Auto-cleanup: Removed oldest session for user",
+            extra={"user_id": user_id, "session_id": session_id_to_remove[:8]},
         )
 
 
@@ -111,7 +115,9 @@ def get_crisis_resources(user_id):
 
         if not resources:
             # Ultimate fallback - try old LLM method
-            print(f"⚠ SOS service failed for {country}, trying fallback LLM method")
+            logger.warning(
+                f"SOS service failed for {country}, trying fallback LLM method"
+            )
             resources = llm_service.find_crisis_resources(country)
 
             if resources:
@@ -122,6 +128,7 @@ def get_crisis_resources(user_id):
             response = jsonify(
                 {
                     "success": False,
+                    "error_code": "RESOURCE_NOT_FOUND",
                     "message": f"Could not find crisis resources for {country}",
                 }
             )
@@ -145,10 +152,15 @@ def get_crisis_resources(user_id):
         return response, 200
 
     except Exception as e:
-        print(f"❌ Error in get_crisis_resources: {str(e)}")
+        logger.error(
+            f"Error in get_crisis_resources: {str(e)}",
+            extra={"country": country},
+            exc_info=True,
+        )
         response = jsonify(
             {
                 "success": False,
+                "error_code": "SERVER_ERROR",
                 "message": f"Error retrieving crisis resources: {str(e)}",
             }
         )
@@ -184,6 +196,7 @@ def send_chat_message(user_id):
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "INVALID_REQUEST",
                         "error": "Invalid request",
                         "message": "JSON data is required",
                     }
@@ -201,6 +214,7 @@ def send_chat_message(user_id):
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "VALIDATION_ERROR",
                         "error": "Invalid message",
                         "message": "Message cannot be empty",
                     }
@@ -227,6 +241,7 @@ def send_chat_message(user_id):
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "VALIDATION_ERROR",
                         "error": "Message too long",
                         "message": "Message must be 1000 characters or less",
                     }
@@ -238,10 +253,15 @@ def send_chat_message(user_id):
         session_id, chain, history_messages = _load_session(session_id, user_id)
 
         if not chain:
+            logger.error(
+                f"Failed to initialize chat session",
+                extra={"user_id": user_id, "session_id": session_id},
+            )
             return (
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "SERVER_ERROR",
                         "error": "Session error",
                         "message": "Could not initialize chat session",
                     }
@@ -308,11 +328,16 @@ def send_chat_message(user_id):
         )
 
     except Exception as e:
-        print(f"Error in send_chat_message: {str(e)}")
+        logger.error(
+            f"Error in send_chat_message: {str(e)}",
+            extra={"user_id": user_id},
+            exc_info=True,
+        )
         return (
             jsonify(
                 {
                     "success": False,
+                    "error_code": "SERVER_ERROR",
                     "error": "Failed to process message",
                     "message": str(e),
                 }
@@ -409,7 +434,11 @@ def _load_session(session_id, user_id):
         return session_id, chain, history_messages
 
     except Exception as e:
-        print(f"Error in _load_session: {str(e)}")
+        logger.error(
+            f"Error in _load_session: {str(e)}",
+            extra={"user_id": user_id, "session_id": session_id},
+            exc_info=True,
+        )
         return None, None, []
 
 

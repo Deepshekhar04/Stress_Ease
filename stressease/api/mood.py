@@ -12,6 +12,9 @@ from stressease.services.mood.mood_service import (
     get_daily_questions,
 )
 from datetime import datetime, date
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Create the mood blueprint
 mood_bp = Blueprint("mood", __name__)
@@ -45,6 +48,7 @@ def submit_daily_quiz(user_id):
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "INVALID_REQUEST",
                         "error": "Invalid request",
                         "message": "JSON body required",
                     }
@@ -62,6 +66,7 @@ def submit_daily_quiz(user_id):
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "VALIDATION_ERROR",
                         "error": "Missing required fields",
                         "message": "core_scores, rotating_scores, and dass_today are required",
                     }
@@ -76,6 +81,7 @@ def submit_daily_quiz(user_id):
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "VALIDATION_ERROR",
                         "error": "Invalid core_scores",
                         "message": "Missing one of mood, energy, sleep, stress",
                     }
@@ -88,6 +94,7 @@ def submit_daily_quiz(user_id):
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "VALIDATION_ERROR",
                         "error": "Invalid core_scores",
                         "message": "All core scores must be integers between 1 and 5",
                     }
@@ -225,10 +232,12 @@ def submit_daily_quiz(user_id):
         result = upsert_daily_mood_log(user_id, daily_doc)
 
         if not result:
+            logger.error(f"Failed to save daily mood log", extra={"user_id": user_id})
             return (
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "DATABASE_ERROR",
                         "error": "Database error",
                         "message": "Failed to save daily mood log",
                     }
@@ -252,7 +261,7 @@ def submit_daily_quiz(user_id):
             questions = get_daily_questions(day_key)
 
             if questions:
-                print(f"✓ Fetched {len(questions)} questions for {day_key}")
+                logger.debug(f"Fetched {len(questions)} questions for {day_key}")
 
                 # Map scores to question text for enriched Q&A context
                 # Questions structure: [4 core, 5 rotating, 3 DASS] = 12 total
@@ -312,17 +321,26 @@ def submit_daily_quiz(user_id):
                 # Add enriched Q&A to daily_doc
                 daily_doc["enriched_qa"] = enriched_qa
             else:
-                print(f"⚠ No questions found for {day_key}, using scores only")
+                logger.warning(f"No questions found for {day_key}, using scores only")
 
             # Pass the enriched quiz data to insights generation
             insights_result = generate_ai_insights(user_id, daily_doc)
             if insights_result:
-                print(f"✓ AI insights generated for user {user_id} on {quiz_date}")
+                logger.info(
+                    f"AI insights generated for user",
+                    extra={"user_id": user_id, "date": quiz_date},
+                )
             else:
-                print(f"⚠ AI insights generation failed for user {user_id}")
+                logger.warning(
+                    f"AI insights generation failed", extra={"user_id": user_id}
+                )
         except Exception as e:
             # Don't fail the quiz submission if insights generation fails
-            print(f"✗ Error generating AI insights for user {user_id}: {str(e)}")
+            logger.error(
+                f"Error generating AI insights: {str(e)}",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
 
         # After saving, check if we have 7 logs to trigger weekly DASS aggregation
         weekly_result = None
@@ -441,7 +459,19 @@ def submit_daily_quiz(user_id):
         )
 
     except Exception as e:
+        logger.error(
+            f"Error in submit_daily_quiz: {str(e)}",
+            extra={"user_id": user_id},
+            exc_info=True,
+        )
         return (
-            jsonify({"success": False, "error": "Server error", "message": str(e)}),
+            jsonify(
+                {
+                    "success": False,
+                    "error_code": "SERVER_ERROR",
+                    "error": "Server error",
+                    "message": str(e),
+                }
+            ),
             500,
         )

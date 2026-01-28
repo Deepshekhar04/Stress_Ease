@@ -8,6 +8,9 @@ from stressease.services.prediction.analytics_service import (
     analyze_trends,
     generate_prediction,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Create the analytics blueprint
 analytics_bp = Blueprint("analytics", __name__)
@@ -35,6 +38,7 @@ def final_summary(user_id):
                 jsonify(
                     {
                         "success": False,
+                        "error_code": "INSUFFICIENT_DATA",
                         "error": "Insufficient Data",
                         "message": "Please complete at least one daily quiz before viewing analytics",
                         "metadata": {
@@ -76,8 +80,19 @@ def final_summary(user_id):
         return jsonify(response_data), 200
 
     except Exception as e:
-        print(f"Error in /analytics/final-summary for user {user_id}: {str(e)}")
+        logger.error(
+            f"Error in /analytics/final-summary: {str(e)}",
+            extra={"user_id": user_id},
+            exc_info=True,
+        )
         return (
-            jsonify({"success": False, "error": "Server error", "message": str(e)}),
+            jsonify(
+                {
+                    "success": False,
+                    "error_code": "SERVER_ERROR",
+                    "error": "Server error",
+                    "message": str(e),
+                }
+            ),
             500,
         )
