@@ -23,6 +23,9 @@ from langchain_core.runnables import Runnable
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -74,12 +77,12 @@ def init_gemini(api_key: str) -> None:
             convert_system_message_to_human=True,
         )
 
-        print("✓ Google Gemini dual-model system initialized successfully")
-        print(f"  - Base model (summarization/insights): gemini-2.0-flash-lite")
-        print(f"  - Advanced model (chat): gemini-2.0-flash-lite")
+        logger.info("Google Gemini dual-model system initialized successfully")
+        logger.info("Base model (summarization/insights): gemini-2.0-flash-lite")
+        logger.info("Advanced model (chat): gemini-2.0-flash-lite")
 
     except Exception as e:
-        print(f"✗ Failed to initialize Gemini models: {str(e)}")
+        logger.error(f"Failed to initialize Gemini models: {str(e)}", exc_info=True)
         raise
 
 
@@ -172,7 +175,7 @@ Provide a brief, empathetic summary:""",
         return summary.strip()
 
     except Exception as e:
-        print(f"Error in mood summarization: {str(e)}")
+        logger.error(f"Error in mood summarization: {str(e)}", exc_info=True)
         # Return graceful fallback
         return "User has been tracking their mood regularly over the past week."
 
@@ -425,7 +428,7 @@ def generate_chat_response(
         return validated_response
 
     except Exception as e:
-        print(f"Error generating chat response: {str(e)}")
+        logger.error(f"Error generating chat response: {str(e)}", exc_info=True)
         return (
             "I'm having trouble connecting right now. Could we try again in a moment?"
         )
@@ -600,5 +603,7 @@ Country: {country}""",
         return resources.dict()
 
     except Exception as e:
-        print(f"Error generating crisis resources for {country}: {str(e)}")
+        logger.error(
+            f"Error generating crisis resources for {country}: {str(e)}", exc_info=True
+        )
         return None
