@@ -7,6 +7,9 @@ LLM performance, latency, and token usage.
 
 import os
 from config import Config
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def init_monitoring():
@@ -21,10 +24,11 @@ def init_monitoring():
         os.environ["LANGCHAIN_API_KEY"] = Config.LANGCHAIN_API_KEY
         os.environ["LANGCHAIN_PROJECT"] = Config.LANGCHAIN_PROJECT
 
-        print("✓ LangSmith monitoring initialized successfully")
-        print(f"  - Project: {Config.LANGCHAIN_PROJECT}")
+        logger.info(
+            f"LangSmith monitoring initialized successfully - Project: {Config.LANGCHAIN_PROJECT}"
+        )
     else:
-        print("! LangSmith monitoring skipped (missing API key or disabled)")
+        logger.info("LangSmith monitoring skipped (missing API key or disabled)")
 
 
 def log_error(error_type, error_message, context=None):
@@ -36,9 +40,8 @@ def log_error(error_type, error_message, context=None):
         error_message (str): Description of the error
         context (dict, optional): Additional context data
     """
-    # In the future, this can be expanded to send custom events to LangSmith
-    # or another monitoring tool. For now, we print to standard output which
-    # is captured by cloud logging.
-    print(f"[{error_type.upper()}] {error_message}")
+    # Log with structured format
     if context:
-        print(f"  Context: {context}")
+        logger.error(f"[{error_type.upper()}] {error_message} | Context: {context}")
+    else:
+        logger.error(f"[{error_type.upper()}] {error_message}")
