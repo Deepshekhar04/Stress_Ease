@@ -16,12 +16,16 @@ logger = logging.getLogger(__name__)
 db = None
 
 
-def init_firebase(credentials_path: str) -> None:
+def init_firebase(credentials_path: str = None) -> None:
     """
     Initialize Firebase Admin SDK with service account credentials.
 
+    Supports two methods:
+    1. Environment variable (cloud deployment): FIREBASE_CREDENTIALS_JSON
+    2. File path (local development): credentials_path parameter
+
     Args:
-        credentials_path (str): Path to the Firebase service account JSON file
+        credentials_path (str, optional): Path to Firebase service account JSON file
 
     Raises:
         Exception: If Firebase initialization fails
@@ -29,16 +33,41 @@ def init_firebase(credentials_path: str) -> None:
     global db
 
     try:
+        import os
+        import json
+
+        # Method 1: Try environment variable first (cloud deployment)
+        firebase_creds_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
+
+        if firebase_creds_json:
+            # Parse JSON string from environment variable
+            cred_dict = json.loads(firebase_creds_json)
+            cred = credentials.Certificate(cred_dict)
+            logger.info(
+                "Firebase initialized from FIREBASE_CREDENTIALS_JSON environment variable"
+            )
+
+        # Method 2: Fall back to file path (local development)
+        elif credentials_path:
+            cred = credentials.Certificate(credentials_path)
+            logger.info(
+                f"Firebase initialized from credentials file: {credentials_path}"
+            )
+
+        else:
+            raise ValueError(
+                "Firebase credentials not found. Provide either:\n"
+                "  1. FIREBASE_CREDENTIALS_JSON environment variable (for cloud), or\n"
+                "  2. FIREBASE_CREDENTIALS_PATH file path (for local development)"
+            )
+
         # Initialize Firebase Admin SDK
-        cred = credentials.Certificate(credentials_path)
         firebase_admin.initialize_app(cred)
 
         # Get Firestore client
         db = firestore.client()
 
-        logger.info(
-            f"Firebase Admin SDK initialized successfully with credentials from {credentials_path}"
-        )
+        logger.info("Firebase Admin SDK initialized successfully")
 
     except Exception as e:
         logger.error(f"Failed to initialize Firebase: {str(e)}", exc_info=True)
