@@ -174,7 +174,7 @@ def create_app():
 
         # Test configuration
         try:
-            if not Config.GEMINI_API_KEY or not Config.FIREBASE_CREDENTIALS_PATH:
+            if not Config.GEMINI_API_KEY:
                 raise ValueError("Missing critical configuration")
             health_status["services"]["config"] = "healthy"
         except Exception as e:

@@ -20,15 +20,20 @@ class Config:
     # SerpApi Configuration (for SOS emergency contacts search)
     SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY")
 
-    # Firebase Configuration
+    # Firebase Configuration (for local development only)
+    # Cloud deployment uses FIREBASE_CREDENTIALS_JSON instead
     FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH")
 
     @classmethod
     def validate_config(cls):
-        """Validate required environment variables and credential path."""
+        """Validate required environment variables.
+
+        Note: Firebase credentials are validated separately by firebase_config.py
+        which supports both FIREBASE_CREDENTIALS_JSON (cloud) and
+        FIREBASE_CREDENTIALS_PATH (local).
+        """
         required_vars = [
             ("GEMINI_API_KEY", cls.GEMINI_API_KEY),
-            ("FIREBASE_CREDENTIALS_PATH", cls.FIREBASE_CREDENTIALS_PATH),
         ]
 
         missing_vars = []
@@ -40,13 +45,6 @@ class Config:
             raise ValueError(
                 f"Missing required environment variables: {', '.join(missing_vars)}. "
                 "Please check your .env file or environment configuration."
-            )
-
-        # Check if Firebase credentials file exists
-        if not os.path.exists(cls.FIREBASE_CREDENTIALS_PATH):
-            raise ValueError(
-                f"Firebase credentials file not found at: {cls.FIREBASE_CREDENTIALS_PATH}. "
-                "Please ensure the file exists and the path is correct."
             )
 
         # Production-specific validation
